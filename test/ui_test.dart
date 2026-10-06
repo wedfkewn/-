@@ -12,7 +12,6 @@ import 'package:xiuxian_app/domain/karma_repository.dart';
 import 'package:xiuxian_app/domain/models.dart';
 import 'package:xiuxian_app/main.dart';
 import 'package:xiuxian_app/ui/karma_page.dart';
-import 'package:xiuxian_app/ui/ink_theme.dart';
 
 void main() {
   setUpAll(() async {
@@ -124,6 +123,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('继续这一世'));
+      await tester.pumpAndSettle();
       expect(find.text('李长生 · 炼气初期'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('切换深浅主题'));
@@ -185,13 +186,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<InkAction>(find.byKey(const Key('cultivate-action')))
-            .onPressed,
-        isNull,
+      expect(find.text('当前没有在世角色。'), findsOneWidget);
+      expect(find.text('继续这一世'), findsNothing);
+      await tester.scrollUntilVisible(find.byType(ListTile), 180);
+      await tester.tap(find.byType(ListTile).first);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
-      await tester.tap(find.text('万世碑').last);
       await tester.pumpAndSettle();
       expect(find.text('一世因果'), findsOneWidget);
       final controller = container.read(gameProvider.notifier);
@@ -262,6 +263,8 @@ void main() {
         expect(tester.takeException(), isNull);
       }
 
+      await tester.tap(find.text('继续这一世'));
+      await tester.pumpAndSettle();
       expect(find.text('游戏第 30 日'), findsOneWidget);
       expect(find.text('修行录'), findsOneWidget);
       await tester.runAsync(() async {

@@ -821,6 +821,8 @@ void main() {
         }
       });
       await tester.pumpAndSettle();
+      await tester.tap(find.text('继续这一世'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('战斗灵力'), findsOneWidget);
       await capture('battle-growth');
       w = (await tester.runAsync(() async => (await db.load())!))!;

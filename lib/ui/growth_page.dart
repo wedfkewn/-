@@ -1,3 +1,4 @@
+import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/game_controller.dart';
@@ -172,7 +173,7 @@ class _GrowthPageState extends ConsumerState<GrowthPage> {
                       if (g.highTrial) {
                         final confirmed = await showDialog<bool>(
                           context: context,
-                          builder: (ctx) => AlertDialog(
+                          builder: (ctx) => InkDialog(
                             title: const Text('确认渡劫'),
                             content: const Text('此劫可能永久陨落，开始后不能逃跑。材料与修为将立即消耗。'),
                             actions: [

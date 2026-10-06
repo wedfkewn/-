@@ -1,3 +1,4 @@
+import 'ink_overlays.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,7 +43,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
             controller.text,
             type: scope == 1 ? KarmaNodeType.npc : null,
           );
-          return AlertDialog(
+          return InkDialog(
             title: const Text('搜索已知实体'),
             content: SizedBox(
               width: 360,
@@ -97,7 +98,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
   }
 
   Future<void> filters() async {
-    await showModalBottomSheet<void>(
+    await showInkSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -377,7 +378,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
                 icon: const Icon(Icons.info_outline),
                 onPressed: () => showDialog<void>(
                   context: context,
-                  builder: (context) => AlertDialog(
+                  builder: (context) => InkDialog(
                     title: const Text('因果图例'),
                     content: const Text(
                       '青绿实线：善缘\n暗红实线：仇怨／竞争\n金色细线：师徒\n双线：血缘\n粉色实线：道侣\n蓝灰细线：宗门\n琥珀虚线：债务／承诺\n灰色虚线：纠缠／事件参与\n淡线：历史或已了结\n\n箭头表示方向，线宽表示强度。\n未经确认的关系不传入画布。',

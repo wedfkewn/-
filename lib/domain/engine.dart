@@ -542,6 +542,11 @@ class GameCommandService {
     w.day += cost;
     p.ageDays += cost;
     if (p.ageDays >= Content.lifespans[p.realm] * 360) {
+      // Invalid input must still be rejected atomically at the lifespan boundary.
+      // Validate on an isolated, unaged copy; its facts and random draws are discarded.
+      final validation = original.copy();
+      validation.player.ageDays = 0;
+      execute(validation, command);
       final expiry = action(
         '寿元耗尽',
         '行动耗时超出此境寿元，这一世终结。',

@@ -1,3 +1,4 @@
+import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/game_controller.dart';
@@ -10,6 +11,7 @@ import 'ink_theme.dart';
 import 'ai_pages.dart';
 import 'map_page.dart';
 import 'growth_page.dart';
+import 'save_page.dart';
 import '../application/ai_service.dart';
 
 class GameShell extends ConsumerStatefulWidget {
@@ -42,13 +44,63 @@ class _GameShellState extends ConsumerState<GameShell>
 
   int tab = 0, activity = -1;
   bool busy = false;
-  Future<void> run(Future<void> Function() action) async {
-    if (busy) {
+  bool showingSaves = true;
+  final deathNotices = <String>{};
+
+  Future<void> returnToSaves() async {
+    final success = await run(
+      () => ref.read(gameProvider.notifier).returnToCurrent(),
+    );
+    if (success && mounted) setState(() => showingSaves = true);
+  }
+
+  void noticeDeath(GameView before, GameView after) {
+    if (before.readOnly ||
+        !after.readOnly ||
+        before.playerId != after.playerId ||
+        !deathNotices.add(after.playerId)) {
       return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      navigator.popUntil((route) => route.isFirst);
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => PopScope(
+          canPop: false,
+          child: InkDialog(
+            canClose: false,
+            title: const Text('此世已终'),
+            content: Text('${after.name}已陨落。\n这一世的世界、因果图谱与长河已封存于万世碑。'),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('返回存档'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (mounted) {
+        setState(() {
+          showingSaves = true;
+          tab = 0;
+          activity = -1;
+        });
+      }
+    });
+  }
+
+  Future<bool> run(Future<void> Function() action) async {
+    if (busy) {
+      return false;
     }
     setState(() => busy = true);
     try {
       await action();
+      return true;
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -59,6 +111,7 @@ class _GameShellState extends ConsumerState<GameShell>
           ),
         );
       }
+      return false;
     } finally {
       if (mounted) {
         setState(() => busy = false);
@@ -80,7 +133,7 @@ class _GameShellState extends ConsumerState<GameShell>
       final confirmed =
           await showDialog<bool>(
             context: context,
-            builder: (ctx) => AlertDialog(
+            builder: (ctx) => InkDialog(
               title: Text('与${n.displayName}交战'),
               content: Text(
                 '你的境界：${v.realm}\n对方已知情况：${n.description}\n危险：战败可能永久死亡，击杀会产生后续因果。',
@@ -151,7 +204,7 @@ class _GameShellState extends ConsumerState<GameShell>
     final choice = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, update) => AlertDialog(
+        builder: (context, update) => InkDialog(
           title: const Text('踏入仙途'),
           content: SingleChildScrollView(
             child: Column(
@@ -232,7 +285,7 @@ class _GameShellState extends ConsumerState<GameShell>
       seed.dispose();
     });
     if (choice == true && mounted) {
-      await run(
+      final success = await run(
         () => ref
             .read(gameProvider.notifier)
             .create(
@@ -243,10 +296,11 @@ class _GameShellState extends ConsumerState<GameShell>
               npcCount: npcCount,
             ),
       );
-      if (mounted) {
+      if (success && mounted) {
         setState(() {
           tab = 0;
           activity = -1;
+          showingSaves = false;
         });
       }
     }
@@ -254,13 +308,47 @@ class _GameShellState extends ConsumerState<GameShell>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(gameProvider, (previous, next) {
+      final before = previous?.asData?.value, after = next.asData?.value;
+      if (before != null && after != null) noticeDeath(before, after);
+    });
     final game = ref.watch(gameProvider);
     final request = ref.watch(aiRequestProvider);
+    final current = game.asData?.value;
+    if (showingSaves && current != null) {
+      return SavePage(
+        view: current,
+        busy: busy,
+        onContinue: () => setState(() {
+          showingSaves = false;
+          tab = 0;
+          activity = -1;
+        }),
+        onCreate: create,
+        onTheme: widget.toggleTheme,
+        onArchive: (id) => run(() async {
+          await ref.read(gameProvider.notifier).openArchive(id);
+          if (mounted) {
+            setState(() {
+              showingSaves = false;
+              tab = 3;
+              activity = -1;
+            });
+          }
+        }),
+      );
+    }
     return Scaffold(
       appBar: tab == 0 && activity < 0 && game.asData?.value.exists == true
           ? null
           : AppBar(
-              leading: tab == 0 && activity >= 0
+              leading: tab == 3
+                  ? IconButton(
+                      tooltip: '返回存档',
+                      onPressed: busy ? null : returnToSaves,
+                      icon: const Icon(Icons.arrow_back),
+                    )
+                  : tab == 0 && activity >= 0
                   ? IconButton(
                       tooltip: '回到修行录',
                       onPressed: () => setState(() => activity = -1),
@@ -760,6 +848,11 @@ class _GameShellState extends ConsumerState<GameShell>
     padding: const EdgeInsets.all(22),
     children: [
       heading('万世碑'),
+      TextButton.icon(
+        onPressed: busy ? null : returnToSaves,
+        icon: const Icon(Icons.arrow_back),
+        label: const Text('返回存档页'),
+      ),
       const Text('每一世的山河与因果独立封存。'),
       if (v.assessment != null) ...[
         heading('一世因果'),

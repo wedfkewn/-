@@ -1,30 +1,33 @@
+import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import '../domain/content.dart';
 import '../domain/karma_repository.dart';
 import '../domain/models.dart';
 
 void showNodeDetails(BuildContext context, KarmaNode node) =>
-    showModalBottomSheet<void>(
+    showInkSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                node.displayName,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 12),
-              Text(node.description),
-              const SizedBox(height: 8),
-              Text('${node.visibility} · ${node.alive ? '存续' : '已入历史'}'),
-              const SizedBox(height: 16),
-            ],
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  node.displayName,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                Text(node.description),
+                const SizedBox(height: 8),
+                Text('${node.visibility} · ${node.alive ? '存续' : '已入历史'}'),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
       ),
@@ -34,7 +37,7 @@ void showEventDetails(
   BuildContext context,
   KarmaRepository repository,
   VisibleEvent event,
-) => showModalBottomSheet<void>(
+) => showInkSheet<void>(
   context: context,
   showDragHandle: true,
   isScrollControlled: true,
@@ -110,7 +113,7 @@ void showEdgeDetails(
   KarmaRepository repository,
   KarmaEdge edge, {
   VoidCallback? onTimeline,
-}) => showModalBottomSheet<void>(
+}) => showInkSheet<void>(
   context: context,
   showDragHandle: true,
   isScrollControlled: true,

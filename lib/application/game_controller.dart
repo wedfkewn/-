@@ -102,9 +102,18 @@ class GameView {
 }
 
 class LifeArchive {
-  const LifeArchive(this.id, this.name, this.day, this.score);
+  const LifeArchive(
+    this.id,
+    this.name,
+    this.day,
+    this.score, {
+    this.realm = '',
+    this.age = 0,
+  });
   final String id, name;
   final int day, score;
+  final String realm;
+  final int age;
 }
 
 class GameController extends AsyncNotifier<GameView> {
@@ -168,9 +177,13 @@ class GameController extends AsyncNotifier<GameView> {
         .map(
           (j) => LifeArchive(
             j['id'],
-            '第 ${records.length - records.indexOf(j)} 世',
+            j['player']?['name'] as String? ??
+                '第 ${records.length - records.indexOf(j)} 世',
             j['day'],
             (j['assessment']?['score'] as int?) ?? 0,
+            realm:
+                '${Content.realms[(j['player']?['realm'] as int?) ?? 0]}${j['mapVersion'] == 0 ? '' : Content.stages[(j['player']?['stage'] as int?) ?? 0]}',
+            age: ((j['player']?['ageDays'] as int?) ?? 0) ~/ 360,
           ),
         )
         .toList();
@@ -318,6 +331,7 @@ class GameController extends AsyncNotifier<GameView> {
         recovered.pendingAi = null;
         await ref.read(databaseProvider).save(recovered, previous: _world);
         _world = recovered;
+        if (recovered.frozen) await _refreshArchives();
         state = AsyncData(_project());
         throw const RuleViolation('上次行动已用本地内容恢复，请检查结果后继续');
       }

@@ -118,11 +118,16 @@ class GameDatabase extends GeneratedDatabase {
 
   Future<List<Map<String, dynamic>>> archives() async {
     final rows = await customSelect(
-      'SELECT payload FROM worlds WHERE frozen = 1 ORDER BY rowid DESC',
+      "SELECT w.payload, e.payload AS player FROM worlds w LEFT JOIN entities e ON e.id = json_extract(w.payload, '\$.playerId') WHERE w.frozen = 1 ORDER BY w.rowid DESC",
     ).get();
     return rows
         .map(
-          (r) => jsonDecode(r.read<String>('payload')) as Map<String, dynamic>,
+          (r) => {
+            ...jsonDecode(r.read<String>('payload')) as Map<String, dynamic>,
+            'player': r.readNullable<String>('player') == null
+                ? null
+                : jsonDecode(r.read<String>('player')),
+          },
         )
         .toList();
   }

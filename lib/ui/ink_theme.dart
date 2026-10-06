@@ -124,6 +124,24 @@ abstract final class InkTheme {
           borderRadius: BorderRadius.all(Radius.circular(4)),
         ),
       ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: surface,
+        contentTextStyle: TextStyle(
+          fontFamily: 'WenKai',
+          fontSize: 15,
+          color: foreground,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: scheme.outline, width: .6),
+        ),
+        elevation: 0,
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: surface,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(),
+      ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: surface,
         foregroundColor: foreground,
@@ -249,15 +267,22 @@ class InkNavigation extends StatelessWidget {
 }
 
 class InkAction extends StatelessWidget {
-  const InkAction({super.key, required this.label, required this.onPressed});
+  const InkAction({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.width = 139,
+    this.height = 49,
+  });
   final String label;
   final VoidCallback? onPressed;
+  final double width, height;
   @override
   Widget build(BuildContext context) => Opacity(
     opacity: onPressed == null ? .4 : 1,
     child: SizedBox(
-      width: 139,
-      height: 49,
+      width: width,
+      height: height,
       child: DecoratedBox(
         decoration: const BoxDecoration(
           image: DecorationImage(

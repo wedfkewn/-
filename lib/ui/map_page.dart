@@ -1,3 +1,4 @@
+import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/game_controller.dart';
@@ -56,7 +57,7 @@ class _MapPageState extends ConsumerState<MapPage> {
       );
       return '${destination.name} · ${road.kind} · ${road.travelDays(view.realmIndex)}日 · ${road.fee}灵石 · 推荐${Content.realms[destination.place.danger]}';
     }).toList();
-    await showModalBottomSheet<void>(
+    await showInkSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (ctx) => SafeArea(

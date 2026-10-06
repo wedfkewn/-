@@ -1,3 +1,4 @@
+import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/ai_service.dart';
@@ -20,7 +21,8 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       consent = false,
       loading = true,
       busy = false,
-      hasKey = false;
+      hasKey = false,
+      loadFailed = false;
   String previousHost = '', message = '';
   List<Map<String, dynamic>> usage = [];
   Map<String, int> totals = {};
@@ -32,24 +34,40 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
   }
 
   Future<void> load() async {
-    final service = ref.read(aiServiceProvider);
-    final s = await service.settings();
-    final saved = await service.secrets.read();
-    final records = await ref.read(databaseProvider).usage();
-    final total = await ref.read(databaseProvider).usageTotals();
-    if (!mounted) return;
-    setState(() {
-      base.text = s.base;
-      model.text = s.model;
-      enabled = s.enabled;
-      world = s.world;
-      consent = s.consent;
-      hasKey = saved?.isNotEmpty == true;
-      previousHost = Uri.tryParse(s.base)?.host ?? '';
-      usage = records;
-      totals = total;
-      loading = false;
-    });
+    if (mounted) {
+      setState(() {
+        loading = true;
+        loadFailed = false;
+      });
+    }
+    try {
+      final service = ref.read(aiServiceProvider);
+      final s = await service.settings();
+      final saved = await service.secrets.read();
+      final records = await ref.read(databaseProvider).usage();
+      final total = await ref.read(databaseProvider).usageTotals();
+      if (!mounted) return;
+      setState(() {
+        base.text = s.base;
+        model.text = s.model;
+        enabled = s.enabled;
+        world = s.world;
+        consent = s.consent;
+        hasKey = saved?.isNotEmpty == true;
+        previousHost = Uri.tryParse(s.base)?.host ?? '';
+        usage = records;
+        totals = total;
+        loading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          loading = false;
+          loadFailed = true;
+          message = '无法读取天机设置或安全密钥，请重试。';
+        });
+      }
+    }
   }
 
   @override
@@ -84,7 +102,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
             final filtered = models
                 .where((id) => id.toLowerCase().contains(query.toLowerCase()))
                 .toList();
-            return AlertDialog(
+            return InkDialog(
               title: Text('选择模型 · ${models.length} 个'),
               content: SizedBox(
                 width: 420,
@@ -152,7 +170,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
         confirmed =
             await showDialog<bool>(
               context: context,
-              builder: (ctx) => AlertDialog(
+              builder: (ctx) => InkDialog(
                 title: const Text('确认服务商变更'),
                 content: Text('新的 API 服务商为 $newHost。原密钥会移除，请输入用于该服务商的密钥后保存。'),
                 actions: [
@@ -212,6 +230,16 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       body: PaperSurface(
         child: loading
             ? const Center(child: CircularProgressIndicator())
+            : loadFailed
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(message),
+                    TextButton(onPressed: load, child: const Text('重试')),
+                  ],
+                ),
+              )
             : ListView(
                 padding: const EdgeInsets.all(22),
                 children: [
@@ -464,7 +492,7 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
       await ref
           .read(gameProvider.notifier)
           .command(GameCommand('talk', target: widget.npc, item: text));
-      input.clear();
+      if (mounted) input.clear();
     } catch (e) {
       error = e is RuleViolation ? e.message : '交谈未能保存';
     } finally {
