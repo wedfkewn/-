@@ -55,6 +55,7 @@ class GameView {
     this.armor,
     this.battleName,
     this.battleHp = 0,
+    this.battleMaxHp = 100,
     this.encounter,
     this.equipment = const [],
     this.dialogue = const [],
@@ -69,6 +70,12 @@ class GameView {
     this.growth = const GrowthView(),
     this.inTribulation = false,
     this.secretStage,
+    this.attributes = const CharacterAttributes(),
+    this.rebirth = const RebirthEntitlement(),
+    this.equipmentAttack = 0,
+    this.equipmentDefense = 0,
+    this.maxQi = 10,
+    this.combatFeedback,
   });
   final bool exists, readOnly;
   final String name, date, seed, realm, location, playerId;
@@ -82,7 +89,8 @@ class GameView {
       coins,
       realmIndex,
       revision,
-      battleHp;
+      battleHp,
+      battleMaxHp;
   final String? weapon, armor, battleName;
   final Map<String, int> inventory, quests;
   final List<String> techniques;
@@ -99,6 +107,10 @@ class GameView {
   final GrowthView growth;
   final bool inTribulation;
   final int? secretStage;
+  final CharacterAttributes attributes;
+  final RebirthEntitlement rebirth;
+  final int equipmentAttack, equipmentDefense, maxQi;
+  final CombatFeedback? combatFeedback;
 }
 
 class LifeArchive {
@@ -124,6 +136,7 @@ class GameController extends AsyncNotifier<GameView> {
   void cancelAi() => ref.read(aiServiceProvider).cancel();
   bool _viewingArchive = false;
   List<LifeArchive> _archives = [];
+  RebirthEntitlement _rebirth = const RebirthEntitlement();
   KarmaRepository? get repository => _repository;
   List<MapRoad>? previewRoute(String target) =>
       _world == null ? null : MapRepository(_world!).route(target);
@@ -173,6 +186,7 @@ class GameController extends AsyncNotifier<GameView> {
 
   Future<void> _refreshArchives() async {
     final records = await ref.read(databaseProvider).archives();
+    _rebirth = await ref.read(databaseProvider).rebirth();
     _archives = records
         .map(
           (j) => LifeArchive(
@@ -192,7 +206,7 @@ class GameController extends AsyncNotifier<GameView> {
   GameView _project() {
     final w = _world;
     if (w == null) {
-      return GameView(archives: _archives);
+      return GameView(archives: _archives, rebirth: _rebirth);
     }
     _repository = KarmaRepository(w);
     final p = w.player;
@@ -216,16 +230,22 @@ class GameController extends AsyncNotifier<GameView> {
           ? Content.realms[p.realm]
           : '${Content.realms[p.realm]}${Content.stages[p.stage]}',
       location: w.entities[p.location]!.name,
+      attributes: p.attributes,
+      rebirth: _rebirth,
+      equipmentAttack: EquipmentRules.stats(w).attack,
+      equipmentDefense: EquipmentRules.stats(w).defense,
+      maxQi: EquipmentRules.maxQi(w),
+      combatFeedback: w.feedback,
       age: p.ageDays ~/ 360,
       day: w.day,
       lifespan: Content.lifespans[p.realm],
       hp: p.hp,
       maxHp: GameCommandService.maxHp(p),
       spirit: p.spirit,
-      awareness: Content.awareness(
-        p.realm,
-        p.spirit,
-        w.techniques.contains('天机诀'),
+      awareness: p.attributes.scale(
+        Content.awareness(p.realm, p.spirit, w.techniques.contains('天机诀')),
+        p.attributes.awareness,
+        4,
       ),
       coins: p.coins,
       realmIndex: p.realm,
@@ -250,6 +270,9 @@ class GameController extends AsyncNotifier<GameView> {
           ? null
           : _repository!.node(w.battleTarget!)?.displayName,
       battleHp: w.battleHp,
+      battleMaxHp: w.battleTarget == null
+          ? 100
+          : GameCommandService.maxHp(w.entities[w.battleTarget]!),
       encounter: w.encounter,
       equipment: List.unmodifiable(w.equipment.values),
       dialogue: List.unmodifiable(w.dialogue),
@@ -271,6 +294,9 @@ class GameController extends AsyncNotifier<GameView> {
     int regionCount = 12,
     int placesPerRegion = 24,
     int npcCount = 1200,
+    CreationDraft? draft,
+    int candidate = 0,
+    List<int> allocation = const [0, 0, 0, 0],
   }) async {
     if (_busy) {
       throw const RuleViolation('正在保存，请稍候');
@@ -287,17 +313,21 @@ class GameController extends AsyncNotifier<GameView> {
       if (current != null && !current.frozen) {
         throw const RuleViolation('当前人生尚未结束，请返回继续修行');
       }
+      final chosenDraft =
+          draft ?? await ref.read(databaseProvider).creationDraft(seed: seed);
+      BirthRules.allocate(chosenDraft, candidate, allocation);
       final next = WorldGenerator.generate(
-        seed: seed.trim().isEmpty
-            ? DateTime.now().microsecondsSinceEpoch.toString()
-            : seed.trim(),
+        seed: chosenDraft.seed,
         name: name,
         regionCount: regionCount,
         placesPerRegion: placesPerRegion,
         npcCount: npcCount,
         worldId: 'life-${DateTime.now().microsecondsSinceEpoch}',
       );
-      await ref.read(databaseProvider).save(next, makeActive: true);
+      await ref
+          .read(databaseProvider)
+          .createLife(next, chosenDraft, candidate, allocation);
+      await _refreshArchives();
       _world = next;
       _viewingArchive = false;
       state = AsyncData(_project());

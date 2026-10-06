@@ -1,16 +1,38 @@
 class Equipment {
-  const Equipment(this.id, this.name, this.slot, {this.affix, this.value = 0});
+  const Equipment(
+    this.id,
+    this.name,
+    this.slot, {
+    this.affix,
+    this.value = 0,
+    this.realm = 0,
+    this.quality = 0,
+    this.base,
+    this.bonuses = const {},
+    this.version = 0,
+  });
   final String id, name, slot;
   final String? affix;
-  final int value;
+  final int value, realm, quality, version;
+  final int? base;
+  final Map<String, int> bonuses;
+  static const qualities = ['凡品', '良品', '上品', '极品'];
+  static const multipliers = [100, 120, 150, 180];
+  int get baseValue => base ?? (slot == 'weapon' ? 12 : 9);
+  Map<String, int> get effects => {...bonuses, ?affix: value};
   String get description =>
-      '${slot == 'weapon' ? '武器 · 攻击＋12' : '护甲 · 减伤＋9'}${affix == null ? '' : ' · $affix＋$value'}';
+      '${version == 0 ? '旧版装备 · ' : ''}${qualities[quality]} · ${slot == 'weapon' ? '武器 · 攻击' : '护甲 · 减伤'}＋$baseValue${effects.entries.map((e) => ' · ${e.key}＋${e.value}').join()}';
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'slot': slot,
     'affix': affix,
     'value': value,
+    'realm': realm,
+    'quality': quality,
+    'base': base,
+    'bonuses': bonuses,
+    'version': version,
   };
   factory Equipment.fromJson(Map<String, dynamic> j) => Equipment(
     j['id'],
@@ -18,6 +40,11 @@ class Equipment {
     j['slot'],
     affix: j['affix'],
     value: j['value'] ?? 0,
+    realm: j['realm'] ?? 0,
+    quality: j['quality'] ?? 0,
+    base: j['base'],
+    bonuses: Map<String, int>.from(j['bonuses'] ?? {}),
+    version: j['version'] ?? 0,
   );
 }
 

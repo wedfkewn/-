@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import '../domain/models.dart';
+import '../domain/engine.dart';
 
 /// SQL is explicit so persisted facts and indexes remain easy to audit; no
 /// generated second set of domain entities is required.
@@ -60,6 +61,126 @@ class GameDatabase extends GeneratedDatabase {
       'CREATE TABLE IF NOT EXISTS ai_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)',
     );
   }
+
+  Future<Map<String, dynamic>?> appRecord(String id) async {
+    final rows = await customSelect(
+      'SELECT payload FROM app_settings WHERE id = ?',
+      variables: [Variable<String>(id)],
+    ).get();
+    return rows.isEmpty
+        ? null
+        : jsonDecode(rows.single.read<String>('payload'))
+              as Map<String, dynamic>;
+  }
+
+  Future<void> putRecord(
+    String id,
+    Map<String, Object?> data,
+  ) => customStatement(
+    'INSERT INTO app_settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
+    [id, jsonEncode(data)],
+  );
+  Future<RebirthEntitlement> rebirth() async {
+    final all = await archives();
+    if (all.isEmpty) return const RebirthEntitlement();
+    final last = all.first;
+    final source = last['id'] as String;
+    final score = (last['assessment']?['score'] as int?) ?? 0;
+    final claimed = await appRecord('birthReceipt:$source');
+    return RebirthEntitlement(
+      source: source,
+      score: score,
+      points: claimed == null ? RebirthEntitlement.reward(score) : 0,
+    );
+  }
+
+  Future<CreationDraft> creationDraft({String? seed}) => transaction(() async {
+    final old = await appRecord('birthDraft');
+    final entitlement = await rebirth();
+    final requested = seed?.trim();
+    if (old != null &&
+        (requested == null || old['seed'] == requested) &&
+        old['source'] == entitlement.source &&
+        old['points'] == entitlement.points) {
+      return CreationDraft.fromJson(old);
+    }
+    final actual = requested == null || requested.isEmpty
+        ? DateTime.now().microsecondsSinceEpoch.toString()
+        : requested;
+    if (actual.length > 100) throw const RuleViolation('种子最多100字');
+    final draft = CreationDraft(
+      'draft-${DateTime.now().microsecondsSinceEpoch}',
+      actual,
+      BirthRules.candidates(actual),
+      entitlement,
+    );
+    await putRecord('birthDraft', draft.toJson());
+    await putRecord('birthChoice', {
+      'draft': draft.id,
+      'index': 0,
+      'points': [0, 0, 0, 0],
+    });
+    return draft;
+  });
+  Future<void> saveBirthChoice(String id, int index, List<int> points) async {
+    if ((await appRecord('birthDraft'))?['id'] != id) {
+      throw const RuleViolation('创角草稿已变化');
+    }
+    await putRecord('birthChoice', {
+      'draft': id,
+      'index': index,
+      'points': points,
+    });
+  }
+
+  Future<void> createLife(
+    World world,
+    CreationDraft expected,
+    int index,
+    List<int> points, {
+    bool failBeforeCommit = false,
+  }) => transaction(() async {
+    final active = await load();
+    if (active != null && !active.frozen) throw const RuleViolation('当前人生尚未结束');
+    final stored = await appRecord('birthDraft');
+    if (stored == null || stored['id'] != expected.id) {
+      throw const RuleViolation('创角草稿已过期');
+    }
+    final draft = CreationDraft.fromJson(stored);
+    final eligible = await rebirth();
+    if (eligible.source != draft.entitlement.source ||
+        eligible.points != draft.entitlement.points) {
+      throw const RuleViolation('转世资格已变化');
+    }
+    final attributes = BirthRules.allocate(draft, index, points);
+    if (world.seed != draft.seed) throw const RuleViolation('世界种子与草稿不符');
+    world.player.attributes = attributes;
+    world.player.hp = GameCommandService.maxHp(world.player);
+    world.battleQi = EquipmentRules.maxQi(world);
+    world.discover(world.playerId, world.playerId, InformationChannel.witness);
+    world.birth = {
+      'version': 1,
+      'draft': draft.id,
+      'index': index,
+      'points': points,
+      'source': eligible.source,
+      'reward': eligible.points,
+    };
+    await save(world, makeActive: true);
+    if (eligible.source != null) {
+      await putRecord('birthReceipt:${eligible.source}', {
+        'world': world.id,
+        'points': eligible.points,
+        'version': 1,
+      });
+    }
+    await customStatement(
+      "DELETE FROM app_settings WHERE id IN ('birthDraft','birthChoice')",
+    );
+    if (failBeforeCommit) {
+      throw StateError('injected birth transaction failure');
+    }
+  });
 
   Future<Map<String, dynamic>> settings() async {
     final rows = await customSelect(

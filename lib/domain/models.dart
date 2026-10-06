@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'character_models.dart';
+export 'character_models.dart';
 import 'adventure_models.dart';
 import 'map_models.dart';
 import 'growth_models.dart';
@@ -96,6 +98,7 @@ class Entity {
       insight = 0,
       injuryDay = -1,
       stabilizedDay = -1;
+  CharacterAttributes attributes = const CharacterAttributes();
   final Map<String, String> growthSources = {};
   final Map<String, int> supplies = {};
   Map<String, Object?> toJson() => {
@@ -123,6 +126,7 @@ class Entity {
     'stabilizedDay': stabilizedDay,
     'growthSources': growthSources,
     'supplies': supplies,
+    'attributes': attributes.toJson(),
   };
   factory Entity.fromJson(Map<String, dynamic> j) =>
       Entity(
@@ -143,6 +147,11 @@ class Entity {
           coins: j['coins'],
           hp: j['hp'],
           lastActed: j['lastActed'] ?? 0,
+        )
+        ..attributes = CharacterAttributes.fromJson(
+          j['attributes'] == null
+              ? null
+              : Map<String, dynamic>.from(j['attributes']),
         )
         ..stage = j['stage'] ?? 0
         ..foundation = j['foundation'] ?? 30
@@ -370,6 +379,29 @@ class World {
   final List<DialogueTurn> dialogue = [];
   final List<Map<String, dynamic>> generations = [];
   final Set<String> completedActions = {};
+  SeedRandom? _equipmentRandom;
+  SeedRandom get equipmentRandom =>
+      _equipmentRandom ??= SeedRandom(SeedRandom.hash('$seed:equipment:v1'));
+  Map<String, dynamic>? birth;
+  CombatFeedback? feedback;
+  void recordCombat({
+    int damage = 0,
+    int received = 0,
+    int healing = 0,
+    int absorbed = 0,
+  }) {
+    final f = feedback;
+    if (f == null) return;
+    feedback = CombatFeedback(
+      actionId: f.actionId,
+      kind: f.kind,
+      damage: f.damage + damage,
+      received: f.received + received,
+      healing: f.healing + healing,
+      absorbed: f.absorbed + absorbed,
+    );
+  }
+
   SeedRandom? _adventureRandom;
   SeedRandom get adventureRandom =>
       _adventureRandom ??= SeedRandom(SeedRandom.hash('$seed:adventure'));
@@ -484,6 +516,8 @@ class World {
     'completedActions': completedActions.toList(),
     'adventureRandom': adventureRandom.state,
     'pendingAi': pendingAi,
+    'equipmentRandom': equipmentRandom.state,
+    'birth': birth,
   };
   Map<String, Object?> toJson() => {
     ...metadata(),
@@ -551,6 +585,10 @@ class World {
     w.pendingAi = j['pendingAi'] == null
         ? null
         : Map<String, dynamic>.from(j['pendingAi']);
+    w.birth = j['birth'] == null ? null : Map<String, dynamic>.from(j['birth']);
+    w._equipmentRandom = SeedRandom(
+      j['equipmentRandom'] ?? SeedRandom.hash('${w.seed}:equipment:v1'),
+    );
     w.weaponId = j['weaponId'];
     w.armorId = j['armorId'];
     w.battleReward = j['battleReward'];

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/game_controller.dart';
 import '../domain/content.dart';
 import '../domain/engine.dart';
+import '../domain/models.dart';
 import 'details.dart';
 import 'karma_page.dart';
 import 'cultivation_page.dart';
@@ -12,6 +13,7 @@ import 'ai_pages.dart';
 import 'map_page.dart';
 import 'growth_page.dart';
 import 'save_page.dart';
+import 'creation_page.dart';
 import '../application/ai_service.dart';
 
 class GameShell extends ConsumerStatefulWidget {
@@ -73,7 +75,9 @@ class _GameShellState extends ConsumerState<GameShell>
           child: InkDialog(
             canClose: false,
             title: const Text('此世已终'),
-            content: Text('${after.name}已陨落。\n这一世的世界、因果图谱与长河已封存于万世碑。'),
+            content: Text(
+              '${after.name}已陨落。\n这一世的世界、因果图谱与长河已封存于万世碑。\n人生影响 ${after.assessment?['score'] ?? 0} · 下一世可分配 ${after.rebirth.points} 点。',
+            ),
             actions: [
               FilledButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -197,112 +201,96 @@ class _GameShellState extends ConsumerState<GameShell>
       child: Text(text),
     ),
   );
-  Future<void> create() async {
-    final name = TextEditingController(text: '李长生');
-    final seed = TextEditingController();
-    var regionCount = 12, placesPerRegion = 24, npcCount = 1200;
-    final choice = await showDialog<bool>(
+  Future<void> equipmentDetails(GameView v, Equipment e) async {
+    final old = v.equipment
+        .where((x) => x.id == (e.slot == 'weapon' ? v.weaponId : v.armorId))
+        .firstOrNull;
+    int attack(Equipment? x) => x == null
+        ? 0
+        : (x.slot == 'weapon' ? x.baseValue : 0) + (x.effects['锋锐'] ?? 0);
+    int defense(Equipment? x) => x == null
+        ? 0
+        : (x.slot == 'armor' ? x.baseValue : 0) + (x.effects['坚韧'] ?? 0);
+    int qi(Equipment? x) => x?.effects['养气'] ?? 0;
+    int strike(int gear) =>
+        (v.attributes.scale(18 + v.realmIndex * 14, v.attributes.physique, 2) +
+            gear) *
+        (100 + v.growth.stage * 5) ~/
+        100;
+    final attackDifference =
+        strike(v.equipmentAttack - attack(old) + attack(e)) -
+        strike(v.equipmentAttack);
+    String delta(int n) => n >= 0 ? '+$n' : '$n';
+    final equipped = e.id == v.weaponId || e.id == v.armorId;
+    final blocked =
+        v.readOnly || busy || v.battleName != null || v.encounter != null;
+    final choice = await showDialog<String>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) => InkDialog(
-          title: const Text('踏入仙途'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: name,
-                  maxLength: 20,
-                  decoration: const InputDecoration(labelText: '道号'),
-                ),
-                TextField(
-                  controller: seed,
-                  maxLength: 100,
-                  decoration: const InputDecoration(labelText: '世界种子（留空随机）'),
-                ),
-                const Text('种子决定初始条件，行动决定后续历史。身死后这一世永久结束。'),
-                ExpansionTile(
-                  title: const Text('世界规模'),
-                  subtitle: Text(
-                    '$regionCount州 · ${regionCount * placesPerRegion}处地点 · $npcCount名NPC',
-                  ),
-                  children: [
-                    DropdownButtonFormField<int>(
-                      initialValue: regionCount,
-                      decoration: const InputDecoration(labelText: '州域数量'),
-                      items: [6, 12, 24]
-                          .map(
-                            (n) =>
-                                DropdownMenuItem(value: n, child: Text('$n州')),
-                          )
-                          .toList(),
-                      onChanged: (value) => update(() => regionCount = value!),
-                    ),
-                    DropdownButtonFormField<int>(
-                      initialValue: placesPerRegion,
-                      decoration: const InputDecoration(labelText: '每州地点'),
-                      items: [16, 24, 32]
-                          .map(
-                            (n) =>
-                                DropdownMenuItem(value: n, child: Text('$n处')),
-                          )
-                          .toList(),
-                      onChanged: (value) =>
-                          update(() => placesPerRegion = value!),
-                    ),
-                    DropdownButtonFormField<int>(
-                      initialValue: npcCount,
-                      decoration: const InputDecoration(labelText: '修士数量'),
-                      items: [600, 1200, 5000]
-                          .map(
-                            (n) =>
-                                DropdownMenuItem(value: n, child: Text('$n名')),
-                          )
-                          .toList(),
-                      onChanged: (value) => update(() => npcCount = value!),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      builder: (ctx) => InkDialog(
+        title: Text(e.name),
+        content: Text(
+          '${Content.realms[e.realm]}可用 · ${e.description}\n替换后普通出手 ${delta(attackDifference)} · 减伤 ${delta(defense(e) - defense(old))} · 灵力 ${delta(qi(e) - qi(old))}\n${e.realm > v.realmIndex
+              ? '境界不足，不能装备'
+              : equipped
+              ? '已装备'
+              : '可装备'}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: blocked || equipped
+                ? null
+                : () => Navigator.pop(ctx, 'sell'),
+            child: Text('出售 · ${EquipmentRules.sale(e)}灵石'),
+          ),
+          FilledButton(
+            onPressed: blocked || equipped || e.realm > v.realmIndex
+                ? null
+                : () => Navigator.pop(ctx, 'equip'),
+            child: const Text('装备'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'sell') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => InkDialog(
+          title: const Text('确认出售'),
+          content: Text(
+            '${e.name} · ${Content.realms[e.realm]} · ${e.description}\n获得${EquipmentRules.sale(e)}灵石，出售后无法撤回。',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(ctx, false),
               child: const Text('返回'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('开始修行'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('确认出售'),
             ),
           ],
         ),
-      ),
-    );
-    final chosenName = name.text, chosenSeed = seed.text;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      name.dispose();
-      seed.dispose();
-    });
-    if (choice == true && mounted) {
-      final success = await run(
-        () => ref
-            .read(gameProvider.notifier)
-            .create(
-              chosenName,
-              chosenSeed,
-              regionCount: regionCount,
-              placesPerRegion: placesPerRegion,
-              npcCount: npcCount,
-            ),
       );
-      if (success && mounted) {
-        setState(() {
-          tab = 0;
-          activity = -1;
-          showingSaves = false;
-        });
+      if (confirmed == true && mounted) {
+        command('sellEquipment', item: e.id);
       }
+    } else {
+      command('equip', item: e.id);
+    }
+  }
+
+  Future<void> create() async {
+    final success = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const CreationPage()),
+    );
+    if (success == true && mounted) {
+      setState(() {
+        tab = 0;
+        activity = -1;
+        showingSaves = false;
+      });
     }
   }
 
@@ -523,12 +511,31 @@ class _GameShellState extends ConsumerState<GameShell>
         ...v.equipment.map(
           (e) => ListTile(
             contentPadding: EdgeInsets.zero,
-            title: Text('${e.name}${e.affix == null ? '' : ' · ${e.affix}'}'),
+            title: Text(
+              '${e.name} · ${Content.realms[e.realm]} · ${Equipment.qualities[e.quality]}',
+              style: TextStyle(
+                color: switch (e.quality) {
+                  1 => Theme.of(context).colorScheme.secondary,
+                  2 => InkTheme.cinnabar,
+                  3 =>
+                    Theme.of(context).brightness == Brightness.dark
+                        ? Colors.purpleAccent
+                        : Colors.deepPurple,
+                  _ => null,
+                },
+              ),
+            ),
+            onTap: () => equipmentDetails(v, e),
             subtitle: Text(
               '${e.description}\n当前：${v.equipment.where((current) => current.id == (e.slot == 'weapon' ? v.weaponId : v.armorId)).firstOrNull?.description ?? '无'}',
             ),
             trailing: TextButton(
-              onPressed: v.readOnly || busy
+              onPressed:
+                  v.readOnly ||
+                      busy ||
+                      e.realm > v.realmIndex ||
+                      v.battleName != null ||
+                      v.encounter != null
                   ? null
                   : () => command('equip', item: e.id),
               child: Text(
@@ -603,7 +610,9 @@ class _GameShellState extends ConsumerState<GameShell>
               (e) => Card(
                 child: ListTile(
                   title: Text(e.key),
-                  subtitle: Text('${e.value}灵石 · 出售半价'),
+                  subtitle: Text(
+                    '${['青锋剑', '玄铁甲'].contains(e.key) ? EquipmentRules.price(e.key, v.realmIndex) : e.value}灵石 · 出售请选具体装备',
+                  ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -619,6 +628,7 @@ class _GameShellState extends ConsumerState<GameShell>
                         onPressed:
                             v.readOnly ||
                                 busy ||
+                                ['青锋剑', '玄铁甲'].contains(e.key) ||
                                 (['青锋剑', '玄铁甲'].contains(e.key)
                                     ? !v.equipment.any(
                                         (item) =>

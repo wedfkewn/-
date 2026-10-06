@@ -187,7 +187,7 @@ void main() {
       expect(n.alive, isTrue);
       expect(w.entities[n.id]!.alive, isFalse);
       expect(w.equipment.length, 1);
-      expect(w.equipment.values.single.affix, isNotNull);
+      expect(w.equipment.values.single.effects, isNotEmpty);
       w = rules.execute(w, GameCommand('equip', item: w.equipment.keys.single));
       await db.save(w, previous: previous);
       final restored = (await db.load())!;

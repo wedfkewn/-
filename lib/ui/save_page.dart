@@ -35,6 +35,10 @@ class SavePage extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(22, 0, 22, 28),
             children: [
+              if (!alive)
+                Text(
+                  '下一世可分配 ${view.rebirth.points} 点 · 上一世人生影响 ${view.rebirth.score}',
+                ),
               Row(
                 children: [
                   Expanded(

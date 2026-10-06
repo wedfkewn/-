@@ -259,15 +259,7 @@ abstract final class AdventureRules {
   }
 
   static Equipment addEquipment(World w, String name, {bool affixed = false}) {
-    const affixes = ['锋锐', '坚韧', '养气'];
-    final affix = affixed ? affixes[w.adventureRandom.next(3)] : null;
-    final e = Equipment(
-      w.nextId('equipment'),
-      name,
-      name == '青锋剑' ? 'weapon' : 'armor',
-      affix: affix,
-      value: affixed ? 3 + w.player.realm * 2 : 0,
-    );
+    final e = EquipmentRules.generate(w, name, affixed);
     w.equipment[e.id] = e;
     return e;
   }
@@ -275,7 +267,7 @@ abstract final class AdventureRules {
   static void award(World w, FactWriter f, String origin) {
     final e = addEquipment(
       w,
-      w.adventureRandom.next(2) == 0 ? '青锋剑' : '玄铁甲',
+      w.equipmentRandom.next(2) == 0 ? '青锋剑' : '玄铁甲',
       affixed: true,
     );
     f.event(
@@ -287,13 +279,12 @@ abstract final class AdventureRules {
     );
   }
 
-  static int affix(World w, String name) =>
-      [w.equipment[w.weaponId], w.equipment[w.armorId]]
-          .whereType<Equipment>()
-          .where((e) => e.affix == name)
-          .fold(0, (sum, e) => sum + e.value);
+  static int affix(World w, String name) => [
+    w.equipment[w.weaponId],
+    w.equipment[w.armorId],
+  ].whereType<Equipment>().fold(0, (sum, e) => sum + (e.effects[name] ?? 0));
   static void start(World w) {
-    w.battleQi = 10 + w.player.realm * 2 + affix(w, '养气');
+    w.battleQi = EquipmentRules.maxQi(w);
     w.battleRound = 0;
     w.battleHp = w.entities[w.battleTarget]!.hp;
   }
@@ -319,12 +310,19 @@ abstract final class AdventureRules {
     if (skill != null && w.battleQi < cost) throw const RuleViolation('战斗灵力不足');
     if (skill != null) w.battleQi -= cost;
     if (skill == '长春诀') {
+      final before = w.player.hp;
       w.player.hp = (w.player.hp + GameCommandService.maxHp(w.player) ~/ 4)
           .clamp(0, GameCommandService.maxHp(w.player));
+      w.recordCombat(healing: w.player.hp - before);
       return 0;
     }
     var damage =
-        18 + w.player.realm * 14 + (w.weapon != null ? 12 : 0) + affix(w, '锋锐');
+        w.player.attributes.scale(
+          18 + w.player.realm * 14,
+          w.player.attributes.physique,
+          2,
+        ) +
+        EquipmentRules.stats(w).attack;
     damage = damage * (100 + w.player.stage * 5) ~/ 100;
     if (skill == '御剑诀') damage = damage * 18 ~/ 10;
     if (w.battleTarget != null &&
@@ -356,12 +354,10 @@ abstract final class AdventureRules {
       damage = 0;
     }
     if (damage > 0) {
-      damage = (damage - (w.armor != null ? 9 : 0) - affix(w, '坚韧')).clamp(
-        3,
-        300,
-      );
+      damage = (damage - EquipmentRules.stats(w).defense).clamp(3, 300);
     }
     if (defend) damage = (damage + 1) ~/ 2;
+    w.recordCombat(received: damage.clamp(0, w.player.hp));
     w.player.hp -= damage;
     w.battleHp = n.hp;
     w.battleRound++;

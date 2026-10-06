@@ -1,6 +1,6 @@
 /// Versioned rules. Costs are game days, never wall-clock time.
 abstract final class Content {
-  static const version = 3;
+  static const version = 4;
   static const stages = ['初期', '中期', '后期', '圆满'];
   static const cultivationThresholds = [
     80,
@@ -81,6 +81,7 @@ abstract final class Content {
     'craft': 3,
     'learn': 7,
     'equip': 1,
+    'sellEquipment': 1,
     'useItem': 1,
     'quest': 5,
     'divine': 7,

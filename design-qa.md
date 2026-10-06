@@ -72,3 +72,11 @@ final result: passed
 390×844 原生 Widget 截图验证：存档在世/封存状态、死亡提示、浅色/深色浮层。键盘280px、文字1.5倍下确认长搜索对话框无溢出；真实子页面中寿元死亡自动退出子页面、只弹一次提示、确认后返回存档，万世碑可返回存档，不修改封存档案。全部84项测试通过；最终布局修改后相关2项再次通过，静态分析无问题。
 
 查看 docs/design/save-selected-reference.png、overlay-selected-reference.png、save-comparison.png、save-sealed.png、sheet-paper.png、sheet-dark.png 和 death-notice.png。相比概念稿，使用现有离线山水图、实际内容和平台可访问的关闭图标；概念稿装饰碑石与底部山峰未另外添加。真实iPhone触控与键盘尚未验证。本轮未编译APK/IPA、未触发Actions。
+
+
+## 1.3.0：武器、资质与转世
+
+- 真实 Flutter 截图：docs/design/birth-candidates.png、battle-light.png、battle-dark.png。
+- 三套候选与加点、草稿恢复、种子切换、装备对比与确认出售、大字体滚动和减少动态效果测试通过。
+- 静态分析无问题，全量 104 项测试通过，包含真实救助—死亡评定—下一世加点及旧档案只读闭环。
+- 原生动效不参与规则与随机数；真机帧率和签名安装另行验证。

@@ -3,6 +3,7 @@ import '../application/game_controller.dart';
 import '../domain/karma_repository.dart';
 import '../domain/models.dart';
 import 'details.dart';
+import 'battle_stage.dart';
 import 'ink_theme.dart';
 
 class CultivationPage extends StatelessWidget {
@@ -266,44 +267,23 @@ class CultivationPage extends StatelessWidget {
                   icon: Icons.temple_buddhist_outlined,
                   onTap: onWorld,
                 ),
-              ] else ...[
-                _ActionRow(
-                  title: view.battleName!,
-                  subtitle:
-                      '对方气血 ${view.battleHp} · 战斗灵力 ${view.battleQi}\n${view.omen}',
-                  icon: Icons.sports_martial_arts,
-                  active: true,
-                  trailing: InkAction(
-                    label: '出手攻击',
-                    onPressed: frozen ? null : () => onCommand('attack'),
-                  ),
-                ),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    TextButton(
-                      onPressed: frozen ? null : () => onCommand('skill'),
-                      child: Text(
-                        '${view.style} · ${view.style == '御剑诀' ? 4 : 3}灵力',
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: frozen ? null : () => onCommand('defend'),
-                      child: const Text('守御调息'),
-                    ),
-                    TextButton(
-                      onPressed: frozen ? null : () => onCommand('useItem'),
-                      child: const Text('服回春丹'),
-                    ),
-                    TextButton(
-                      onPressed: frozen || view.inTribulation
-                          ? null
-                          : () => onCommand('flee'),
-                      child: Text(view.inTribulation ? '雷劫不可逃离' : '尝试脱身'),
-                    ),
-                  ],
-                ),
               ],
+              BattleStage(
+                key: const ValueKey('battle-stage'),
+                view: view,
+                busy: busy,
+                onCommand: onCommand,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  List.generate(
+                    4,
+                    (i) =>
+                        '${CharacterAttributes.labels[i]} ${view.attributes.values[i]}',
+                  ).join(' · '),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(top: 11, bottom: 8),
                 child: InkWell(

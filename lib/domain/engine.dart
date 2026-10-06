@@ -4,6 +4,7 @@ import 'map_repository.dart';
 part 'adventure_rules.dart';
 part 'map_rules.dart';
 part 'growth_rules.dart';
+part 'equipment_rules.dart';
 
 class RuleViolation implements Exception {
   const RuleViolation(this.message);
@@ -490,6 +491,17 @@ class GameCommandService {
     if (w.mapVersion == 0) MapRules.generate(w);
     w.rulesVersion = Content.version;
     final f = FactWriter(w);
+    if (original.battleTarget != null || original.tribulation != null) {
+      w.feedback = CombatFeedback(
+        actionId: '${w.id}:${original.revision + 1}',
+        kind:
+            '${original.tribulation != null ? '雷劫:' : ''}${command.kind == 'skill' ? (command.item ?? w.style) : command.kind}',
+        damage: 0,
+        received: 0,
+        healing: 0,
+        absorbed: 0,
+      );
+    }
     final p = w.player;
     Entity target({bool nearby = true}) {
       final t = w.entities[command.target];
@@ -618,10 +630,7 @@ class GameCommandService {
           action('调整流派', '当前流派：${w.style}。');
         case 'defend':
           if (w.battleTarget == null) throw const RuleViolation('当前没有战斗');
-          w.battleQi = (w.battleQi + 2).clamp(
-            0,
-            10 + p.realm * 2 + AdventureRules.affix(w, '养气'),
-          );
+          w.battleQi = (w.battleQi + 2).clamp(0, EquipmentRules.maxQi(w));
           action(
             '守御调息',
             '本合减伤一半，恢复2点战斗灵力。',
@@ -731,7 +740,9 @@ class GameCommandService {
               !point.resources.contains(item)) {
             throw const RuleViolation('此地不出售该突破材料');
           }
-          final price = Content.prices[item];
+          final price = ['青锋剑', '玄铁甲'].contains(item)
+              ? EquipmentRules.price(item!, p.realm)
+              : Content.prices[item];
           if (price == null ||
               command.amount == 0 ||
               command.amount.abs() > 99) {
@@ -756,6 +767,9 @@ class GameCommandService {
                         e.id != w.armorId,
                   )
                   .toList();
+              if (available.any((e) => e.version > 0)) {
+                throw const RuleViolation('请选择具体装备出售');
+              }
               if (available.length < -command.amount) {
                 throw const RuleViolation('未装备的物品不足');
               }
@@ -792,6 +806,17 @@ class GameCommandService {
               bidirectional: true,
             );
           }
+        case 'sellEquipment':
+          final e = w.equipment[command.item];
+          if (e == null || e.id == w.weaponId || e.id == w.armorId) {
+            throw const RuleViolation('只能出售持有且未装备的物品');
+          }
+          p.coins += EquipmentRules.sale(e);
+          w.equipment.remove(e.id);
+          action(
+            '售出${e.name}',
+            '${e.description}，获得${EquipmentRules.sale(e)}灵石。',
+          );
         case 'craft':
           final item = command.item;
           final herbs = Content.recipes[item];
@@ -818,6 +843,10 @@ class GameCommandService {
                   .where((e) => e.name == command.item)
                   .firstOrNull;
           if (equipment == null) throw const RuleViolation('未持有此装备');
+          if (!['weapon', 'armor'].contains(equipment.slot) ||
+              equipment.realm > p.realm) {
+            throw const RuleViolation('境界不足，不能装备');
+          }
           if (equipment.slot == 'weapon') {
             w.weaponId = equipment.id;
             w.weapon = equipment.name;
@@ -833,7 +862,9 @@ class GameCommandService {
           }
           consume(item!, 1);
           if (item == '回春丹') {
+            final beforeHp = p.hp;
             p.hp = (p.hp + 65).clamp(0, maxHp(p));
+            w.recordCombat(healing: p.hp - beforeHp);
           } else {
             p.spirit += 40;
           }
@@ -996,10 +1027,10 @@ class GameCommandService {
             throw const RuleViolation('金丹境方可感知天机');
           }
           spend(12);
-          final awareness = Content.awareness(
-            p.realm,
-            p.spirit,
-            w.techniques.contains('天机诀'),
+          final awareness = p.attributes.scale(
+            Content.awareness(p.realm, p.spirit, w.techniques.contains('天机诀')),
+            p.attributes.awareness,
+            4,
           );
           final depth =
               (p.realm -
@@ -1072,6 +1103,7 @@ class GameCommandService {
               ? (command.item ?? w.style)
               : null;
           final damage = AdventureRules.attack(w, chosenSkill);
+          w.recordCombat(damage: damage.clamp(0, n.hp));
           n.hp -= damage;
           w.battleHp = n.hp;
           final origin = w.events[w.battleOrigin]!;
@@ -1190,8 +1222,11 @@ class GameCommandService {
     return w;
   }
 
-  static int maxHp(Entity e) =>
-      (100 + e.realm * 40) * (100 + e.stage * 5) ~/ 100;
+  static int maxHp(Entity e) => e.attributes.scale(
+    (100 + e.realm * 40) * (100 + e.stage * 5) ~/ 100,
+    e.attributes.physique,
+    4,
+  );
   void _counterattack(World w, FactWriter f) {
     AdventureRules.counter(w, f);
   }

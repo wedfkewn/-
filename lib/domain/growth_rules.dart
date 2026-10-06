@@ -78,7 +78,10 @@ abstract final class GrowthRules {
       if (w.battleTarget != null || w.tribulation != null) '正在交锋',
       if (w.encounter != null) '奇遇尚未处理',
       if (w.secretRun != null) '请先离开秘境',
-      if (p.stage == 3 && p.realm < 8 && p.insight < 10 + p.realm * 10) '感悟不足',
+      if (p.stage == 3 &&
+          p.realm < 8 &&
+          p.insight < p.attributes.insightRequired(p.realm))
+        '感悟不足',
       if (material.isNotEmpty && (w.inventory[material] ?? 0) < 1)
         '缺少$material',
       if (p.stage == 3 && !suitable(w, p))
@@ -92,7 +95,7 @@ abstract final class GrowthRules {
       insight: p.insight,
       threshold: Content.threshold(p.realm, p.stage),
       rootRequired: rootRequired(p),
-      insightRequired: p.stage == 3 ? 10 + p.realm * 10 : 0,
+      insightRequired: p.stage == 3 ? p.attributes.insightRequired(p.realm) : 0,
       material: material,
       chance: chance,
       injured: injured(w, p),
@@ -195,11 +198,14 @@ abstract final class GrowthRules {
                 (1 + p.realm * .35) *
                 (1 + (point.aura - 1) * .1))
             .floor();
-    p.spirit += gain;
+    p.spirit += p.attributes.scale(gain, p.attributes.root, 4);
     p.hp = (p.hp + 15).clamp(0, GameCommandService.maxHp(p));
-    f.event('cultivate', '闭关修炼', '主修${w.style}，借当地灵气积累$gain修为；根基与感悟需另行准备。', [
-      p.id,
-    ]);
+    f.event(
+      'cultivate',
+      '闭关修炼',
+      '主修${w.style}，借当地灵气积累${p.attributes.scale(gain, p.attributes.root, 4)}修为；根基与感悟需另行准备。',
+      [p.id],
+    );
   }
 
   static void stabilize(World w, FactWriter f, {bool practice = false}) {
@@ -295,7 +301,7 @@ abstract final class GrowthRules {
             (command.target == null ? 0 : 50),
         guard: command.target,
       );
-      w.battleQi = 10 + p.realm * 2 + AdventureRules.affix(w, '养气');
+      w.battleQi = EquipmentRules.maxQi(w);
       return;
     }
     if (w.random.next(100) < preview.chance) {
@@ -399,13 +405,12 @@ abstract final class GrowthRules {
         throw const RuleViolation('雷劫中可使用持有的回春丹');
       }
       w.inventory['回春丹'] = w.inventory['回春丹']! - 1;
+      final before = p.hp;
       p.hp = (p.hp + 65).clamp(0, GameCommandService.maxHp(p));
+      w.recordCombat(healing: p.hp - before);
     } else if (command.kind == 'defend') {
       defense = true;
-      w.battleQi = (w.battleQi + 2).clamp(
-        0,
-        10 + p.realm * 2 + AdventureRules.affix(w, '养气'),
-      );
+      w.battleQi = (w.battleQi + 2).clamp(0, EquipmentRules.maxQi(w));
     } else if (command.kind == 'skill' || command.kind == 'attack') {
       final skill = command.kind == 'skill' ? (command.item ?? w.style) : null;
       strike = AdventureRules.attack(w, skill);
@@ -414,13 +419,17 @@ abstract final class GrowthRules {
       throw const RuleViolation('雷劫中只能攻击、施法、防御或用药');
     }
     var damage = 70 + p.realm * 9 + (t.turn.isOdd ? 45 : 0);
-    damage = (damage - strike ~/ 3 - AdventureRules.affix(w, '坚韧')).clamp(
+    damage = (damage - strike ~/ 3 - EquipmentRules.stats(w).defense).clamp(
       10,
       500,
     );
     if (defense || disrupt) damage = (damage * .5).ceil();
     final absorbed = damage.clamp(0, t.shield);
     t.shield -= absorbed;
+    w.recordCombat(
+      received: (damage - absorbed).clamp(0, p.hp),
+      absorbed: absorbed,
+    );
     p.hp -= damage - absorbed;
     final e = f.event(
       'tribulationRound',

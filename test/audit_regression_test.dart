@@ -155,14 +155,25 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('开启新一世'));
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('开始修行'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('开始修行'));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),
       );
       await tester.pumpAndSettle();
+      expect(find.text('踏入仙途'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
       expect(find.text('仙途存档'), findsOneWidget);
-      expect(find.text('开启新一世'), findsOneWidget);
       expect(await tester.runAsync(db.load), isNull);
       expect(tester.takeException(), isNull);
     },
