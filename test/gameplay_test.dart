@@ -66,6 +66,10 @@ void main() {
       // Exploration, not a UI demo, discovers the tablet.
       for (var i = 0; i < 60 && !w.quests.containsKey('古碑'); i++) {
         w = c.execute(w, const GameCommand('explore'));
+        final choice = w.encounter!.options.any((o) => o.id == 'tablet')
+            ? 'tablet'
+            : 'leave';
+        w = c.execute(w, GameCommand('chooseEncounter', item: choice));
       }
       expect(w.quests, contains('古碑'));
       w = c.execute(w, const GameCommand('quest', item: '古碑'));
@@ -81,6 +85,7 @@ void main() {
       GameCommand('wait'),
       GameCommand('cultivate'),
       GameCommand('explore'),
+      GameCommand('chooseEncounter', item: 'leave'),
       GameCommand('wait'),
     ];
     for (final command in sequence) {

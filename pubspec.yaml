@@ -1,7 +1,7 @@
 name: xiuxian_app
 description: 离线文字修仙与动态因果长河
 publish_to: none
-version: 1.0.0+2
+version: 1.1.0+3
 environment:
   sdk: '>=3.11.0 <4.0.0'
 dependencies:
@@ -14,6 +14,8 @@ dependencies:
   sqlite3: ^3.5.2
   path_provider: ^2.1.6
   path: ^1.9.1
+  dio: ^5.11.1
+  flutter_secure_storage: ^11.2.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

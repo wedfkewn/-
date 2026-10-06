@@ -6,10 +6,19 @@ import '../domain/content.dart';
 import '../domain/engine.dart';
 import '../domain/karma_repository.dart';
 import '../domain/models.dart';
+import 'ai_service.dart';
 
 final databaseProvider = Provider<GameDatabase>(
   (ref) => throw UnimplementedError('数据库未初始化'),
 );
+final aiServiceProvider = Provider<AiContentService>(
+  (ref) => AiContentService(
+    ref.read(databaseProvider),
+    ref.read(aiClientProvider),
+    ref.read(secretStoreProvider),
+  ),
+);
+
 final gameProvider = AsyncNotifierProvider<GameController, GameView>(
   GameController.new,
 );
@@ -45,6 +54,15 @@ class GameView {
     this.armor,
     this.battleName,
     this.battleHp = 0,
+    this.encounter,
+    this.equipment = const [],
+    this.dialogue = const [],
+    this.battleQi = 0,
+    this.omen = '',
+    this.style = '长春诀',
+    this.weaponId,
+    this.armorId,
+    this.aiNotice = '',
     this.archives = const [],
   });
   final bool exists, readOnly;
@@ -65,6 +83,12 @@ class GameView {
   final List<String> techniques;
   final List<KarmaNode> nearby, places, sects;
   final Map<String, Object?>? assessment;
+  final Encounter? encounter;
+  final List<Equipment> equipment;
+  final List<DialogueTurn> dialogue;
+  final int battleQi;
+  final String omen, style, aiNotice;
+  final String? weaponId, armorId;
   final List<LifeArchive> archives;
 }
 
@@ -78,12 +102,34 @@ class GameController extends AsyncNotifier<GameView> {
   World? _world;
   KarmaRepository? _repository;
   bool _busy = false;
+  String _aiNotice = '';
+  void cancelAi() => ref.read(aiServiceProvider).cancel();
   bool _viewingArchive = false;
   List<LifeArchive> _archives = [];
   KarmaRepository? get repository => _repository;
   @override
   Future<GameView> build() async {
+    final service = ref.read(aiServiceProvider);
+    ref.onDispose(service.cancel);
     _world = await ref.read(databaseProvider).load();
+    if (_world?.pendingAi != null && !_world!.frozen) {
+      final pending = _world!.pendingAi!;
+      final next = GameCommandService().execute(
+        _world!,
+        GameCommand(
+          pending['kind'],
+          target: pending['target'],
+          item: pending['item'],
+          amount: pending['amount'] ?? 1,
+          secret: pending['secret'] ?? false,
+          actionId: pending['id'],
+        ),
+      );
+      next.pendingAi = null;
+      _aiNotice = '上次生成已中断，使用本地内容恢复行动。';
+      await ref.read(databaseProvider).save(next, previous: _world);
+      _world = next;
+    }
     await _refreshArchives();
     return _project();
   }
@@ -155,6 +201,15 @@ class GameController extends AsyncNotifier<GameView> {
           ? null
           : _repository!.node(w.battleTarget!)?.displayName,
       battleHp: w.battleHp,
+      encounter: w.encounter,
+      equipment: List.unmodifiable(w.equipment.values),
+      dialogue: List.unmodifiable(w.dialogue),
+      battleQi: w.battleQi,
+      omen: AdventureRules.omen(w),
+      style: w.style,
+      weaponId: w.weaponId,
+      armorId: w.armorId,
+      aiNotice: _aiNotice,
       archives: List.unmodifiable(_archives),
     );
   }
@@ -200,17 +255,163 @@ class GameController extends AsyncNotifier<GameView> {
     }
     _busy = true;
     try {
-      final current = _world!;
-      final next = await Isolate.run(
-        () => GameCommandService().execute(current, command),
+      if (_world!.pendingAi != null) {
+        final pending = _world!.pendingAi!;
+        final recovered = GameCommandService().execute(
+          _world!,
+          GameCommand(
+            pending['kind'],
+            target: pending['target'],
+            item: pending['item'],
+            amount: pending['amount'] ?? 1,
+            secret: pending['secret'] ?? false,
+            actionId: pending['id'],
+          ),
+        );
+        recovered.pendingAi = null;
+        await ref.read(databaseProvider).save(recovered, previous: _world);
+        _world = recovered;
+        state = AsyncData(_project());
+        throw const RuleViolation('上次行动已用本地内容恢复，请检查结果后继续');
+      }
+      final original = _world!;
+      final fallback = await Isolate.run(
+        () => GameCommandService().execute(original, command),
       );
-      await ref.read(databaseProvider).save(next, previous: _world);
+      // Validate before any charged request, including invalid command/target/input.
+      if (command.kind == 'talk') {
+        if (command.item == null ||
+            command.item!.trim().isEmpty ||
+            command.item!.runes.length > 300) {
+          throw const RuleViolation('请输入1至300字');
+        }
+        ref
+            .read(aiServiceProvider)
+            .context(
+              original,
+              'talk',
+              target: command.target,
+              input: command.item,
+            );
+      }
+      if (original.encounter != null && command.kind != 'chooseEncounter') {
+        throw const RuleViolation('请先处理待定奇遇');
+      }
+      if (original.battleTarget != null &&
+          ![
+            'attack',
+            'skill',
+            'defend',
+            'useItem',
+            'flee',
+          ].contains(command.kind)) {
+        throw const RuleViolation('请先完成战斗');
+      }
+      final service = ref.read(aiServiceProvider);
+      service.beginAction();
+      final settings = await service.settings();
+      final enabled = settings.enabled && settings.consent;
+      final kind = command.kind;
+      var current = original;
+      final actionId = '${current.id}:command:${current.revision}';
+      _aiNotice = '';
+      if (enabled && (kind == 'explore' || kind == 'talk' || settings.world)) {
+        current = original.copy();
+        current.pendingAi = {
+          'id': actionId,
+          'kind': kind,
+          'target': command.target,
+          'item': command.item,
+          'amount': command.amount,
+          'secret': command.secret,
+        };
+        await ref.read(databaseProvider).save(current, previous: original);
+        _world = current;
+      }
+      Map<String, dynamic>? generated;
+      if (enabled && (kind == 'explore' || kind == 'talk')) {
+        ref
+            .read(aiRequestProvider.notifier)
+            .update(kind == 'explore' ? '推演奇遇…' : '倾听人物…');
+        try {
+          generated = await service.generate(
+            current,
+            kind,
+            settings,
+            target: command.target,
+            input: command.item,
+          );
+        } on AiFailure catch (e) {
+          _aiNotice = '${e.message}，使用本地内容。';
+        }
+      }
+      if (_world?.id != current.id ||
+          _world?.revision != current.revision ||
+          _viewingArchive) {
+        throw const RuleViolation('生成对应的世界已失效');
+      }
+      final submitted = GameCommand(
+        kind,
+        target: command.target,
+        item: command.item,
+        amount: command.amount,
+        secret: command.secret,
+        proposal: generated?['proposal'],
+        generation: generated == null
+            ? null
+            : {
+                ...generated,
+                'worldId': current.id,
+                'revision': current.revision,
+                'actionId': actionId,
+              },
+        actionId: actionId,
+      );
+      final next = generated == null
+          ? fallback
+          : await Isolate.run(
+              () => GameCommandService().execute(current, submitted),
+            );
+      next.completedActions.add(actionId);
+      next.pendingAi = null;
+      if (enabled &&
+          settings.world &&
+          service.foreground &&
+          !service.cancelled &&
+          !next.frozen &&
+          next.encounter == null &&
+          next.battleTarget == null &&
+          next.day ~/ 30 > next.aiWorldDay ~/ 30) {
+        next.aiWorldDay = next.day;
+        if (AdventureRules.worldCatalog(next).isNotEmpty) {
+          ref.read(aiRequestProvider.notifier).update('推演世事…');
+          try {
+            final worldResult = await service.generate(next, 'world', settings);
+            AiProposalValidator.validate(
+              next,
+              'world',
+              worldResult['proposal'],
+            );
+            AdventureRules.worldProposal(next, worldResult['proposal']);
+            next.generations.add({
+              ...worldResult,
+              'worldId': next.id,
+              'revision': next.revision,
+              'actionId': '$actionId:world',
+            });
+          } on AiFailure catch (e) {
+            _aiNotice = '${e.message}，世事依本地规则运行。';
+          }
+        }
+      }
+      await ref.read(databaseProvider).save(next, previous: current);
       _world = next;
       if (next.frozen) {
         await _refreshArchives();
       }
       state = AsyncData(_project());
     } finally {
+      ref.read(aiRequestProvider.notifier).update(null);
       _busy = false;
     }
   }

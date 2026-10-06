@@ -1,5 +1,6 @@
 import 'content.dart';
 import 'models.dart';
+part 'adventure_rules.dart';
 
 class RuleViolation implements Exception {
   const RuleViolation(this.message);
@@ -255,7 +256,7 @@ class WorldGenerator {
     int npcCount = 120,
     int version = 1,
   }) {
-    if (version != Content.version || npcCount < 1 || npcCount > 10000) {
+    if (version != 1 || npcCount < 1 || npcCount > 10000) {
       throw const RuleViolation('不支持的世界生成配置');
     }
     final rng = SeedRandom(SeedRandom.hash('$seed|$version|$npcCount'));
@@ -408,7 +409,12 @@ class GameCommand {
     this.item,
     this.amount = 1,
     this.secret = false,
+    this.proposal,
+    this.generation,
+    this.actionId,
   });
+  final Map<String, dynamic>? proposal, generation;
+  final String? actionId;
   final String kind;
   final String? target, item;
   final int amount;
@@ -424,11 +430,33 @@ class GameCommandService {
     if (!Content.durations.containsKey(command.kind)) {
       throw const RuleViolation('未知行动');
     }
+    if (command.actionId != null &&
+        original.completedActions.contains(command.actionId)) {
+      throw const RuleViolation('此行动已经结算');
+    }
+    if (original.encounter != null && command.kind != 'chooseEncounter') {
+      throw const RuleViolation('请先处理待定奇遇');
+    }
+    if (command.proposal != null) {
+      AiProposalValidator.validate(
+        original,
+        command.kind,
+        command.proposal!,
+        target: command.target,
+      );
+    }
     if (original.battleTarget != null &&
-        !['attack', 'skill', 'useItem', 'flee'].contains(command.kind)) {
+        ![
+          'attack',
+          'skill',
+          'defend',
+          'useItem',
+          'flee',
+        ].contains(command.kind)) {
       throw const RuleViolation('战斗中只能攻击、施法、用药或逃跑');
     }
     final w = original.copy();
+    w.rulesVersion = Content.version;
     final f = FactWriter(w);
     final p = w.player;
     Entity target({bool nearby = true}) {
@@ -474,7 +502,9 @@ class GameCommandService {
       importance: importance,
       causes: causes,
     );
-    final cost = Content.durations[command.kind]!;
+    final cost = command.kind == 'chooseEncounter' && command.item == 'leave'
+        ? 0
+        : Content.durations[command.kind]!;
     w.day += cost;
     p.ageDays += cost;
     switch (command.kind) {
@@ -527,37 +557,29 @@ class GameCommandService {
           w.discover(p.id, n.id, InformationChannel.witness);
         }
       case 'explore':
-        final outcome = w.random.next(4);
-        if (outcome == 0) {
-          w.inventory['灵草'] = (w.inventory['灵草'] ?? 0) + 3;
-          action('采得灵草', '发现三株可炼丹的灵草。');
-        } else if (outcome == 1) {
-          p.coins += 15;
-          action('古道遗宝', '寻得十五枚灵石。');
-        } else if (outcome == 2) {
-          final nearby = w.entities.values
-              .where(
-                (n) =>
-                    n.type == KarmaNodeType.npc &&
-                    n.alive &&
-                    n.location == p.location,
-              )
-              .toList();
-          if (nearby.isNotEmpty) {
-            final n = nearby[w.random.next(nearby.length)];
-            n.hp = (n.hp - 30).clamp(1, maxHp(n));
-            action(
-              '发现负伤修士',
-              '${n.name}遇险受伤，可出手救助。',
-              participants: [p.id, n.id],
-            );
-          } else {
-            action('山野寻访', '此处未遇修士，记录沿途山川。');
-          }
-        } else {
-          w.quests.putIfAbsent('古碑', () => 0);
-          action('发现古碑', '古碑记载丹方线索，可在奇遇中继续调查。');
+        w.encounter = AdventureRules.discover(w, f, command.proposal);
+      case 'chooseEncounter':
+        AdventureRules.choose(w, f, command.item);
+      case 'talk':
+        AdventureRules.talk(w, f, command);
+      case 'setStyle':
+        if (command.item == null || !w.techniques.contains(command.item)) {
+          throw const RuleViolation('尚未掌握该功法');
         }
+        w.style = command.item!;
+        action('调整流派', '当前流派：${w.style}。');
+      case 'defend':
+        if (w.battleTarget == null) throw const RuleViolation('当前没有战斗');
+        w.battleQi = (w.battleQi + 2).clamp(
+          0,
+          10 + p.realm * 2 + AdventureRules.affix(w, '养气'),
+        );
+        action(
+          '守御调息',
+          '本合减伤一半，恢复2点战斗灵力。',
+          causes: [Cause(w.battleOrigin!, CausalKind.direct)],
+        );
+        AdventureRules.counter(w, f, defend: true);
       case 'rescue':
         final n = target();
         if (n.hp >= maxHp(n)) {
@@ -659,9 +681,30 @@ class GameCommandService {
         }
         if (command.amount > 0) {
           spend(price * command.amount);
-          w.inventory[item!] = (w.inventory[item] ?? 0) + command.amount;
+          if (['青锋剑', '玄铁甲'].contains(item)) {
+            for (var i = 0; i < command.amount; i++) {
+              AdventureRules.addEquipment(w, item!);
+            }
+          } else {
+            w.inventory[item!] = (w.inventory[item] ?? 0) + command.amount;
+          }
         } else {
-          consume(item!, -command.amount);
+          if (['青锋剑', '玄铁甲'].contains(item)) {
+            final available = w.equipment.values
+                .where(
+                  (e) =>
+                      e.name == item && e.id != w.weaponId && e.id != w.armorId,
+                )
+                .toList();
+            if (available.length < -command.amount) {
+              throw const RuleViolation('未装备的物品不足');
+            }
+            for (final e in available.take(-command.amount)) {
+              w.equipment.remove(e.id);
+            }
+          } else {
+            consume(item!, -command.amount);
+          }
           p.coins += price * -command.amount ~/ 2;
         }
         final merchant = command.target == null ? null : target();
@@ -700,16 +743,18 @@ class GameCommandService {
         w.techniques.add(item);
         action('参悟$item', '功法融会贯通，修炼与神识增强。');
       case 'equip':
-        final item = command.item;
-        if (!['青锋剑', '玄铁甲'].contains(item) || (w.inventory[item] ?? 0) < 1) {
-          throw const RuleViolation('未持有此装备');
-        }
-        if (item == '青锋剑') {
-          w.weapon = item;
+        final equipment =
+            w.equipment[command.item] ??
+            w.equipment.values.where((e) => e.name == command.item).firstOrNull;
+        if (equipment == null) throw const RuleViolation('未持有此装备');
+        if (equipment.slot == 'weapon') {
+          w.weaponId = equipment.id;
+          w.weapon = equipment.name;
         } else {
-          w.armor = item;
+          w.armorId = equipment.id;
+          w.armor = equipment.name;
         }
-        action('装备$item', '装备效果已生效。');
+        action('装备${equipment.name}', equipment.description);
       case 'useItem':
         final item = command.item;
         if (!['回春丹', '聚灵丹'].contains(item)) {
@@ -935,7 +980,7 @@ class GameCommandService {
       case 'startBattle':
         final n = target();
         w.battleTarget = n.id;
-        w.battleHp = n.hp;
+        AdventureRules.start(w);
         final e = f.event(
           command.secret ? 'secretKill' : 'challenge',
           '与${n.name}交战',
@@ -944,25 +989,18 @@ class GameCommandService {
           witnessed: !command.secret,
         );
         w.battleOrigin = e.id;
+        w.battleReward = null;
+        AdventureRules.start(w);
       case 'attack':
       case 'skill':
         if (w.battleTarget == null) {
           throw const RuleViolation('当前没有战斗');
         }
-        if (command.kind == 'skill') {
-          if (p.spirit < 5) {
-            throw const RuleViolation('施法需要五点修为');
-          }
-          p.spirit -= 5;
-        }
         final n = w.entities[w.battleTarget]!;
-        final damage =
-            18 +
-            p.realm * 14 +
-            (w.weapon != null ? 12 : 0) +
-            (command.kind == 'skill'
-                ? 18 + (w.techniques.contains('御剑诀') ? 15 : 0)
-                : 0);
+        final chosenSkill = command.kind == 'skill'
+            ? (command.item ?? w.style)
+            : null;
+        final damage = AdventureRules.attack(w, chosenSkill);
         n.hp -= damage;
         w.battleHp = n.hp;
         final origin = w.events[w.battleOrigin]!;
@@ -979,6 +1017,9 @@ class GameCommandService {
           f.die(n, e);
           p.coins += n.coins;
           n.coins = 0;
+          if (w.battleReward == 'equipment') AdventureRules.award(w, f, e.id);
+          if (w.battleReward == 'coins') p.coins += 15 + p.realm * 5;
+          w.battleReward = null;
           w.battleTarget = null;
           w.battleOrigin = null;
         } else {
@@ -990,7 +1031,7 @@ class GameCommandService {
             causes: [Cause(origin.id, CausalKind.direct)],
             witnessed: origin.kind != 'secretKill',
           );
-          _counterattack(w, f);
+          AdventureRules.counter(w, f, disrupt: chosenSkill == '天机诀');
         }
       case 'flee':
         if (w.battleTarget == null) {
@@ -1001,6 +1042,7 @@ class GameCommandService {
           action('脱离战斗', '成功退走，交战的因果仍然存在。');
           w.battleTarget = null;
           w.battleOrigin = null;
+          w.battleReward = null;
         } else {
           action('逃跑失败', '被对手追上。');
           _counterattack(w, f);
@@ -1032,6 +1074,8 @@ class GameCommandService {
         w.discover(p.id, r.id, InformationChannel.witness);
       }
     }
+    if (command.actionId != null) w.completedActions.add(command.actionId!);
+    if (command.generation != null) w.generations.add(command.generation!);
     p.updated = w.day;
     if (w.frozen) {
       w.assessment = LifeAssessment.calculate(w);
@@ -1042,24 +1086,7 @@ class GameCommandService {
 
   static int maxHp(Entity e) => 100 + e.realm * 40;
   void _counterattack(World w, FactWriter f) {
-    final n = w.entities[w.battleTarget]!;
-    final p = w.player;
-    final damage = (12 + n.realm * 12 - (w.armor != null ? 9 : 0)).clamp(
-      3,
-      150,
-    );
-    p.hp -= damage;
-    final e = f.event(
-      'counterattack',
-      '${n.name}反击',
-      '${p.name}受到 $damage 伤害。',
-      [n.id, p.id],
-      causes: [Cause(w.battleOrigin!, CausalKind.direct)],
-      witnessed: w.events[w.battleOrigin]?.kind != 'secretKill',
-    );
-    if (p.hp <= 0) {
-      f.die(p, e);
-    }
+    AdventureRules.counter(w, f);
   }
 }
 
@@ -1437,7 +1464,7 @@ class WorldSimulationService {
       );
       w.battleTarget = n.id;
       w.battleOrigin = e.id;
-      w.battleHp = n.hp;
+      AdventureRules.start(w);
     }
   }
 

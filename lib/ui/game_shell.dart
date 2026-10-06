@@ -7,6 +7,8 @@ import 'details.dart';
 import 'karma_page.dart';
 import 'cultivation_page.dart';
 import 'ink_theme.dart';
+import 'ai_pages.dart';
+import '../application/ai_service.dart';
 
 class GameShell extends ConsumerStatefulWidget {
   const GameShell({super.key, required this.toggleTheme});
@@ -15,7 +17,27 @@ class GameShell extends ConsumerStatefulWidget {
   ConsumerState<GameShell> createState() => _GameShellState();
 }
 
-class _GameShellState extends ConsumerState<GameShell> {
+class _GameShellState extends ConsumerState<GameShell>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    ref
+        .read(aiServiceProvider)
+        .setForeground(state == AppLifecycleState.resumed);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   int tab = 0, activity = -1;
   bool busy = false;
   Future<void> run(Future<void> Function() action) async {
@@ -48,8 +70,35 @@ class _GameShellState extends ConsumerState<GameShell> {
     String? item,
     int amount = 1,
     bool secret = false,
-  }) => run(
-    () => ref
+  }) => run(() async {
+    if (kind == 'startBattle' && mounted) {
+      final v = ref.read(gameProvider).asData!.value;
+      final n = ref.read(gameProvider.notifier).repository!.node(target ?? '');
+      if (n == null) throw const RuleViolation('未知人物');
+      final confirmed =
+          await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: Text('与${n.displayName}交战'),
+              content: Text(
+                '你的境界：${v.realm}\n对方已知情况：${n.description}\n危险：战败可能永久死亡，击杀会产生后续因果。',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('退避'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('确认交战'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+      if (!confirmed) return;
+    }
+    await ref
         .read(gameProvider.notifier)
         .command(
           GameCommand(
@@ -59,8 +108,16 @@ class _GameShellState extends ConsumerState<GameShell> {
             amount: amount,
             secret: secret,
           ),
-        ),
-  );
+        );
+    if (kind == 'explore' &&
+        mounted &&
+        ref.read(gameProvider).asData?.value.encounter != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(builder: (_) => const EncounterPage()),
+      );
+    }
+  });
   Widget button(
     GameView view,
     String text,
@@ -141,6 +198,7 @@ class _GameShellState extends ConsumerState<GameShell> {
   @override
   Widget build(BuildContext context) {
     final game = ref.watch(gameProvider);
+    final request = ref.watch(aiRequestProvider);
     return Scaffold(
       appBar: tab == 0 && activity < 0 && game.asData?.value.exists == true
           ? null
@@ -156,6 +214,16 @@ class _GameShellState extends ConsumerState<GameShell> {
                 tab == 0 ? '修行杂记' : const ['修行录', '山河志', '因果录', '万世碑'][tab],
               ),
               actions: [
+                IconButton(
+                  tooltip: '天机设置',
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AiSettingsPage(),
+                    ),
+                  ),
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                ),
                 IconButton(
                   tooltip: '切换深浅主题',
                   onPressed: widget.toggleTheme,
@@ -231,7 +299,25 @@ class _GameShellState extends ConsumerState<GameShell> {
                     2 => const KarmaPage(),
                     _ => archives(v),
                   },
-                  if (busy)
+                  if (request != null)
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: Material(
+                        color: Theme.of(context).colorScheme.surface,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 16),
+                            Expanded(child: Text(request)),
+                            TextButton(
+                              onPressed: () =>
+                                  ref.read(gameProvider.notifier).cancelAi(),
+                              child: const Text('取消生成'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (busy && request == null)
                     const Align(
                       alignment: Alignment.topCenter,
                       child: LinearProgressIndicator(),
@@ -274,6 +360,31 @@ class _GameShellState extends ConsumerState<GameShell> {
       if (activity == 0) ...[
         heading('修行功法'),
         Text(v.techniques.join(' · ')),
+        Text('当前流派：${v.style}'),
+        Wrap(
+          children: v.techniques
+              .map((t) => button(v, '采用$t', 'setStyle', item: t))
+              .toList(),
+        ),
+        heading('装备'),
+        if (v.equipment.isEmpty) const Text('尚无装备；可在坊市购买或奇遇获得。'),
+        ...v.equipment.map(
+          (e) => ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('${e.name}${e.affix == null ? '' : ' · ${e.affix}'}'),
+            subtitle: Text(
+              '${e.description}\n当前：${v.equipment.where((current) => current.id == (e.slot == 'weapon' ? v.weaponId : v.armorId)).firstOrNull?.description ?? '无'}',
+            ),
+            trailing: TextButton(
+              onPressed: v.readOnly || busy
+                  ? null
+                  : () => command('equip', item: e.id),
+              child: Text(
+                e.id == v.weaponId || e.id == v.armorId ? '已装备' : '替换',
+              ),
+            ),
+          ),
+        ),
         heading('行囊'),
         ...v.inventory.entries
             .where((e) => e.value > 0)
@@ -344,7 +455,16 @@ class _GameShellState extends ConsumerState<GameShell> {
                   IconButton(
                     tooltip: '出售${e.key}',
                     onPressed:
-                        v.readOnly || busy || (v.inventory[e.key] ?? 0) < 1
+                        v.readOnly ||
+                            busy ||
+                            (['青锋剑', '玄铁甲'].contains(e.key)
+                                ? !v.equipment.any(
+                                    (item) =>
+                                        item.name == e.key &&
+                                        item.id != v.weaponId &&
+                                        item.id != v.armorId,
+                                  )
+                                : (v.inventory[e.key] ?? 0) < 1)
                         ? null
                         : () => command('trade', item: e.key, amount: -1),
                     icon: const Icon(Icons.sell_outlined),
@@ -388,6 +508,13 @@ class _GameShellState extends ConsumerState<GameShell> {
           ),
         ),
       ],
+      TextButton(
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const AiSettingsPage()),
+        ),
+        child: const Text('天机设置'),
+      ),
       heading('近日见闻'),
       ...ref
           .read(gameProvider.notifier)
@@ -419,6 +546,15 @@ class _GameShellState extends ConsumerState<GameShell> {
       ),
       const SizedBox(height: 8),
       const Text('行过山河，方知众生因缘。'),
+      if (v.encounter != null)
+        FilledButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute<void>(builder: (_) => const EncounterPage()),
+          ),
+          child: Text('待处理奇遇 · ${v.encounter!.title}'),
+        ),
+      if (v.aiNotice.isNotEmpty) Text(v.aiNotice),
       const SizedBox(height: 18),
       const Divider(),
       Padding(
@@ -433,7 +569,13 @@ class _GameShellState extends ConsumerState<GameShell> {
             ),
             InkAction(
               label: '探索 · 3日',
-              onPressed: v.readOnly || busy ? null : () => command('explore'),
+              onPressed:
+                  v.readOnly ||
+                      busy ||
+                      v.encounter != null ||
+                      v.battleName != null
+                  ? null
+                  : () => command('explore'),
             ),
           ],
         ),
@@ -485,6 +627,24 @@ class _GameShellState extends ConsumerState<GameShell> {
                   alignment: Alignment.centerLeft,
                   child: Wrap(
                     children: [
+                      TextButton(
+                        onPressed:
+                            v.readOnly ||
+                                busy ||
+                                v.encounter != null ||
+                                v.battleName != null
+                            ? null
+                            : () => Navigator.push(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => DialoguePage(
+                                    npc: n.id,
+                                    name: n.displayName,
+                                  ),
+                                ),
+                              ),
+                        child: const Text('交谈'),
+                      ),
                       for (final action in const {
                         '救助': 'rescue',
                         '结交': 'befriend',

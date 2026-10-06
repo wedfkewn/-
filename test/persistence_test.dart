@@ -109,7 +109,7 @@ void main() {
     },
   );
   test(
-    'v1 schema migrates to v2 with active selection and adjacency/time indexes',
+    'v1 schema migrates to v3 with active selection, AI settings and indexes',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'karma-migration-',
@@ -154,6 +154,9 @@ void main() {
       final db = GameDatabase(NativeDatabase(file));
       try {
         expect((await db.load())!.id, 'legacy');
+        expect(await db.settings(), isEmpty);
+        expect((await db.usageTotals())['requests'], 0);
+        expect(db.schemaVersion, 3);
         final indexes = await db
             .customSelect("SELECT name FROM sqlite_master WHERE type = 'index'")
             .get();

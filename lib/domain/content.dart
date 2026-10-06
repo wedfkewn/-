@@ -1,6 +1,6 @@
 /// Versioned rules. Costs are game days, never wall-clock time.
 abstract final class Content {
-  static const version = 1;
+  static const version = 2;
   static int awareness(int realm, int spirit, bool hasTianji) =>
       10 + realm * 20 + (spirit ~/ 10).clamp(0, 40) + (hasTianji ? 20 : 0);
   static const questDescriptions = {
@@ -59,6 +59,10 @@ abstract final class Content {
     'repay': 1,
     'companion': 7,
     'wait': 30,
+    'chooseEncounter': 1,
+    'talk': 1,
+    'defend': 1,
+    'setStyle': 1,
   };
   static String date(int day) =>
       '玄元历 ${day ~/ 360 + 1} 年 ${day % 360 ~/ 30 + 1} 月 ${day % 30 + 1} 日';

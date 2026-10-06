@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'adventure_models.dart';
+export 'adventure_models.dart';
 
 enum KarmaNodeType {
   player,
@@ -325,6 +327,19 @@ class World {
   final Set<String> processedDeaths = {};
   String? weapon, armor, battleTarget, battleOrigin;
   int battleHp = 0;
+  int rulesVersion = 2, battleQi = 10, battleRound = 0, aiWorldDay = 0;
+  String style = '长春诀';
+  String? weaponId, armorId, battleReward;
+  Encounter? encounter;
+  Map<String, dynamic>? pendingAi;
+  final Map<String, Equipment> equipment = {};
+  final List<DialogueTurn> dialogue = [];
+  final List<Map<String, dynamic>> generations = [];
+  final Set<String> completedActions = {};
+  SeedRandom? _adventureRandom;
+  SeedRandom get adventureRandom =>
+      _adventureRandom ??= SeedRandom(SeedRandom.hash('$seed:adventure'));
+
   Map<String, Object?>? assessment;
   Entity get player => entities[playerId]!;
   String nextId(String kind) => '$id:$kind:${sequence++}';
@@ -394,6 +409,21 @@ class World {
     'battleOrigin': battleOrigin,
     'battleHp': battleHp,
     'assessment': assessment,
+    'rulesVersion': rulesVersion,
+    'battleQi': battleQi,
+    'battleRound': battleRound,
+    'aiWorldDay': aiWorldDay,
+    'style': style,
+    'weaponId': weaponId,
+    'armorId': armorId,
+    'battleReward': battleReward,
+    'encounter': encounter?.toJson(),
+    'equipment': equipment.values.map((e) => e.toJson()).toList(),
+    'dialogue': dialogue.map((e) => e.toJson()).toList(),
+    'generations': generations,
+    'completedActions': completedActions.toList(),
+    'adventureRandom': adventureRandom.state,
+    'pendingAi': pendingAi,
   };
   Map<String, Object?> toJson() => {
     ...metadata(),
@@ -429,6 +459,36 @@ class World {
     w.battleTarget = j['battleTarget'];
     w.battleOrigin = j['battleOrigin'];
     w.battleHp = j['battleHp'];
+    w.rulesVersion = j['rulesVersion'] ?? 1;
+    w.battleQi = j['battleQi'] ?? 10;
+    w.battleRound = j['battleRound'] ?? 0;
+    w.aiWorldDay = j['aiWorldDay'] ?? w.day;
+    w.style = j['style'] ?? '长春诀';
+    w.pendingAi = j['pendingAi'] == null
+        ? null
+        : Map<String, dynamic>.from(j['pendingAi']);
+    w.weaponId = j['weaponId'];
+    w.armorId = j['armorId'];
+    w.battleReward = j['battleReward'];
+    w._adventureRandom = SeedRandom(
+      j['adventureRandom'] ?? SeedRandom.hash('${w.seed}:adventure'),
+    );
+    if (j['encounter'] != null) {
+      w.encounter = Encounter.fromJson(
+        Map<String, dynamic>.from(j['encounter']),
+      );
+    }
+    for (final value in j['equipment'] ?? []) {
+      final e = Equipment.fromJson(Map<String, dynamic>.from(value));
+      w.equipment[e.id] = e;
+    }
+    for (final value in j['dialogue'] ?? []) {
+      w.dialogue.add(DialogueTurn.fromJson(Map<String, dynamic>.from(value)));
+    }
+    for (final value in j['generations'] ?? []) {
+      w.generations.add(Map<String, dynamic>.from(value));
+    }
+    w.completedActions.addAll(List<String>.from(j['completedActions'] ?? []));
     w.assessment = j['assessment'] == null
         ? null
         : Map<String, Object?>.from(j['assessment']);
@@ -447,6 +507,21 @@ class World {
     for (final value in j['knowledge'] ?? []) {
       final e = Knowledge.fromJson(Map<String, dynamic>.from(value));
       w.knowledge[e.key] = e;
+    }
+    if (j['equipment'] == null) {
+      for (final name in ['青锋剑', '玄铁甲']) {
+        for (var i = 0; i < (w.inventory[name] ?? 0); i++) {
+          final id = '${w.id}:legacy:$name:$i';
+          w.equipment[id] = Equipment(
+            id,
+            name,
+            name == '青锋剑' ? 'weapon' : 'armor',
+          );
+          if (i == 0 && w.weapon == name) w.weaponId = id;
+          if (i == 0 && w.armor == name) w.armorId = id;
+        }
+        w.inventory.remove(name);
+      }
     }
     return w;
   }

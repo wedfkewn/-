@@ -268,7 +268,8 @@ class CultivationPage extends StatelessWidget {
               ] else ...[
                 _ActionRow(
                   title: view.battleName!,
-                  subtitle: '对方气血 ${view.battleHp}',
+                  subtitle:
+                      '对方气血 ${view.battleHp} · 战斗灵力 ${view.battleQi}\n${view.omen}',
                   icon: Icons.sports_martial_arts,
                   active: true,
                   trailing: InkAction(
@@ -281,7 +282,13 @@ class CultivationPage extends StatelessWidget {
                   children: [
                     TextButton(
                       onPressed: frozen ? null : () => onCommand('skill'),
-                      child: const Text('施展功法 · 5修为'),
+                      child: Text(
+                        '${view.style} · ${view.style == '御剑诀' ? 4 : 3}灵力',
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: frozen ? null : () => onCommand('defend'),
+                      child: const Text('守御调息'),
                     ),
                     TextButton(
                       onPressed: frozen ? null : () => onCommand('useItem'),

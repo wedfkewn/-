@@ -12,7 +12,7 @@ class GameDatabase extends GeneratedDatabase {
       GameDatabase(NativeDatabase.createInBackground(file));
   factory GameDatabase.memory() => GameDatabase(NativeDatabase.memory());
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -34,6 +34,7 @@ class GameDatabase extends GeneratedDatabase {
         'CREATE TABLE knowledge (id TEXT PRIMARY KEY, world_id TEXT NOT NULL REFERENCES worlds(id), observer TEXT NOT NULL, subject TEXT NOT NULL, payload TEXT NOT NULL)',
       );
       await _indexes();
+      await _aiTables();
     },
     onUpgrade: (_, from, to) async {
       if (from == 1) {
@@ -45,11 +46,58 @@ class GameDatabase extends GeneratedDatabase {
         );
         await _indexes();
       }
+      if (from < 3) await _aiTables();
     },
     beforeOpen: (_) async {
       await customStatement('PRAGMA foreign_keys = ON');
     },
   );
+  Future<void> _aiTables() async {
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS app_settings (id TEXT PRIMARY KEY, payload TEXT NOT NULL)',
+    );
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS ai_usage (id INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)',
+    );
+  }
+
+  Future<Map<String, dynamic>> settings() async {
+    final rows = await customSelect(
+      "SELECT payload FROM app_settings WHERE id = 'ai'",
+    ).get();
+    return rows.isEmpty
+        ? {}
+        : jsonDecode(rows.single.read<String>('payload'))
+              as Map<String, dynamic>;
+  }
+
+  Future<void> saveSettings(Map<String, dynamic> values) => customStatement(
+    "INSERT INTO app_settings VALUES ('ai', ?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+    [jsonEncode(values)],
+  );
+  Future<void> logUsage(Map<String, dynamic> values) => customStatement(
+    'INSERT INTO ai_usage(payload) VALUES (?)',
+    [jsonEncode(values)],
+  );
+  Future<Map<String, int>> usageTotals() async {
+    final row = (await customSelect(
+      r"SELECT COUNT(*) AS requests, COALESCE(SUM(json_extract(payload, '$.input')),0) AS input, COALESCE(SUM(json_extract(payload, '$.output')),0) AS output, SUM(CASE WHEN json_extract(payload,'$.input') IS NULL OR json_extract(payload,'$.output') IS NULL THEN 1 ELSE 0 END) AS unknown FROM ai_usage",
+    ).get()).single;
+    return {
+      for (final name in ['requests', 'input', 'output', 'unknown'])
+        name: row.read<int?>(name) ?? 0,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> usage() async =>
+      (await customSelect(
+            'SELECT payload FROM ai_usage ORDER BY id DESC LIMIT 500',
+          ).get())
+          .map(
+            (r) =>
+                jsonDecode(r.read<String>('payload')) as Map<String, dynamic>,
+          )
+          .toList();
   Future<void> _indexes() async {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS relation_source ON relations(world_id, source)',
@@ -113,11 +161,18 @@ class GameDatabase extends GeneratedDatabase {
   }) async {
     await transaction(() async {
       final existing = await customSelect(
-        'SELECT frozen FROM worlds WHERE id = ?',
+        'SELECT frozen, payload FROM worlds WHERE id = ?',
         variables: [Variable<String>(next.id)],
       ).get();
       if (existing.isNotEmpty && existing.single.read<int>('frozen') == 1) {
         throw StateError('只读人生档案不可覆盖');
+      }
+      if (previous != null && existing.isNotEmpty) {
+        final saved =
+            jsonDecode(existing.single.read<String>('payload')) as Map;
+        if (saved['revision'] != previous.revision) {
+          throw StateError('存档版本已变化，拒绝过期结果');
+        }
       }
       if (makeActive) {
         await customStatement('UPDATE worlds SET active = 0 WHERE active = 1');
