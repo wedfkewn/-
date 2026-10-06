@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'application/game_controller.dart';
 import 'data/game_database.dart';
 import 'ui/game_shell.dart';
+import 'ui/ink_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,20 +40,7 @@ class XiuxianApp extends StatefulWidget {
 
 class _XiuxianAppState extends State<XiuxianApp> {
   ThemeMode mode = ThemeMode.system;
-  ThemeData theme(Brightness brightness) => ThemeData(
-    useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xff526f63),
-      brightness: brightness,
-      surface: brightness == Brightness.light
-          ? const Color(0xfff4f1e9)
-          : const Color(0xff1b2220),
-    ),
-    scaffoldBackgroundColor: brightness == Brightness.light
-        ? const Color(0xfff4f1e9)
-        : const Color(0xff1b2220),
-    visualDensity: VisualDensity.standard,
-  );
+  ThemeData theme(Brightness brightness) => InkTheme.build(brightness);
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: '一世仙途',

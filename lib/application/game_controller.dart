@@ -24,6 +24,7 @@ class GameView {
     this.realm = '',
     this.location = '',
     this.age = 0,
+    this.day = 0,
     this.lifespan = 0,
     this.hp = 0,
     this.maxHp = 100,
@@ -49,6 +50,7 @@ class GameView {
   final bool exists, readOnly;
   final String name, date, seed, realm, location, playerId;
   final int age,
+      day,
       lifespan,
       hp,
       maxHp,
@@ -126,6 +128,7 @@ class GameController extends AsyncNotifier<GameView> {
       realm: Content.realms[p.realm],
       location: w.entities[p.location]!.name,
       age: p.ageDays ~/ 360,
+      day: w.day,
       lifespan: Content.lifespans[p.realm],
       hp: p.hp,
       maxHp: GameCommandService.maxHp(p),

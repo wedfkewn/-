@@ -12,14 +12,22 @@ import 'package:xiuxian_app/domain/karma_repository.dart';
 import 'package:xiuxian_app/domain/models.dart';
 import 'package:xiuxian_app/main.dart';
 import 'package:xiuxian_app/ui/karma_page.dart';
+import 'package:xiuxian_app/ui/ink_theme.dart';
 
 void main() {
   setUpAll(() async {
-    final fontFile = File('C:/Windows/Fonts/simhei.ttf');
-    if (await fontFile.exists()) {
-      final loader = FontLoader('QAChinese')
+    await (FontLoader(
+      'MaterialIcons',
+    )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+    for (final entry in {
+      'MaShan': 'MaShanZheng-Regular.ttf',
+      'WenKai': 'LXGWWenKai-Regular.ttf',
+    }.entries) {
+      final loader = FontLoader(entry.key)
         ..addFont(
-          fontFile.readAsBytes().then((bytes) => ByteData.sublistView(bytes)),
+          File(
+            'assets/fonts/${entry.value}',
+          ).readAsBytes().then((bytes) => ByteData.sublistView(bytes)),
         );
       await loader.load();
     }
@@ -179,7 +187,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '闭关30日'))
+            .widget<InkAction>(find.byKey(const Key('cultivate-action')))
             .onPressed,
         isNull,
       );
@@ -207,6 +215,126 @@ void main() {
         ),
       );
       expect((await tester.runAsync(() => db.load()))!.player.name, '新修士');
+    },
+  );
+  testWidgets(
+    'selected folio design: real data, workshop navigation and visual captures',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final db = GameDatabase.memory();
+      addTearDown(db.close);
+      var w = WorldGenerator.generate(
+        seed: 'folio',
+        worldId: 'folio',
+        npcCount: 12,
+      );
+      w = GameCommandService().execute(
+        w,
+        const GameCommand('rescue', target: 'folio:npc:0'),
+      );
+      w.day = 30;
+      w.player.spirit = 80;
+      w.player.hp = 100;
+      w.player.coins = 30;
+      await db.save(w, makeActive: true);
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [databaseProvider.overrideWithValue(db)],
+          child: RepaintBoundary(key: key, child: const XiuxianApp()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> capture(String name) async {
+        await tester.runAsync(() async {
+          final boundary =
+              key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+          final shot = await boundary.toImage(pixelRatio: 2);
+          final data = await shot.toByteData(format: ui.ImageByteFormat.png);
+          final file = File('build/qa/$name.png');
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(data!.buffer.asUint8List());
+          shot.dispose();
+        });
+        expect(tester.takeException(), isNull);
+      }
+
+      expect(find.text('游戏第 30 日'), findsOneWidget);
+      expect(find.text('修行录'), findsOneWidget);
+      await tester.runAsync(() async {
+        await Future.wait([
+          for (final name in [
+            'rice-paper',
+            'cultivation-landscape',
+            'ink-action',
+            'crimson-mark',
+            'navigation-ink',
+            'breakthrough-ink',
+          ])
+            precacheImage(
+              AssetImage('assets/images/$name.png'),
+              key.currentContext!,
+            ),
+        ]);
+      });
+      await tester.pumpAndSettle();
+      await capture('cultivation-folio');
+      tester.platformDispatcher.textScaleFactorTestValue = 1.4;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpAndSettle();
+      await capture('cultivation-folio-large');
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('切换深浅主题'));
+      await tester.pumpAndSettle();
+      await capture('cultivation-folio-dark');
+      await tester.tap(find.byTooltip('切换深浅主题'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('行囊 · 功法'),
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('行囊 · 功法'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('行囊 · 功法'));
+      await tester.pumpAndSettle();
+      expect(find.text('行囊'), findsOneWidget);
+      await tester.tap(find.byTooltip('回到修行录'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('世界').last);
+      await tester.pumpAndSettle();
+      await capture('world-folio');
+      await tester.tap(find.text('因果').last);
+      await tester.pumpAndSettle();
+      await capture('karma-folio');
+      await tester.tap(find.text('万世碑').last);
+      await tester.pumpAndSettle();
+      await capture('archives-folio');
+      await tester.tap(find.text('修行').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('cultivate-action')));
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        key.currentContext!,
+        listen: false,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('cultivate-action')));
+        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        while (container.read(gameProvider).asData!.value.day == 30 &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      await tester.pumpAndSettle();
+      expect(container.read(gameProvider).asData!.value.day, 60);
+      expect((await tester.runAsync(() => db.load()))!.day, 60);
+      expect(tester.takeException(), isNull);
     },
   );
   testWidgets('render graph artifact for visual inspection', (tester) async {

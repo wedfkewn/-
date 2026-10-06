@@ -2,6 +2,14 @@
 
 独立 Flutter 离线文字修仙应用，Android / iOS。游戏时间只随行动推进；关闭应用后世界暂停。
 
+## 朱印古卷界面
+
+按用户选定的第三张设计稿重做原生界面：宣纸、水墨横幅、书法标题、朱砂印章、墨按钮与水墨导航。字体和图像随包离线使用；近日因缘仍由知识过滤后的真实关系生成。深浅主题、文字放大、命令与存档继续工作。
+
+![修行录](docs/design/cultivation-folio.png)
+
+视觉对照及差异记录见 [design-qa.md](design-qa.md)。资源来源与字体许可证见 [assets/SOURCES.md](assets/SOURCES.md)。版本1.0.0+2，不改变世界规则或存档结构。
+
 ## 运行
 
 需要 Flutter 3.47 / Dart 3.13 或兼容版本、Android SDK 与 Java 17。iOS 构建需要 macOS / Xcode。
@@ -61,6 +69,6 @@ flutter build ios --no-codesign
 - 手机布局、主题、搜索筛选、节点与边点击、拖动、双指缩放和只读页面测试。视觉测试输出 `build/qa/karma-phone.png`；Windows 可加载本机黑体改善检查图片，字体不打包进应用。
 - 5000 NPC、50000关系、100000事件规模测试；默认查询有节点与边上限。此为查询吞吐验证，不能替代 Android 实机60fps检查。
 
-本次静态分析通过，31项自动化测试通过；规模测试最近一次索引约15ms，100次受限查询约77ms（Windows 测试环境，非手机帧率）。
+本次静态分析通过，32项自动化测试通过；规模测试最近一次索引约15ms，100次受限查询约77ms（Windows 测试环境，非手机帧率）。
 
-未连接 Android 实机；相同游戏源码已在 GitHub macOS runner 上使用 Xcode 26.6 编译通过，生成未签名真机 IPA 与模拟器应用，31项测试全部通过。构建记录：https://github.com/wedfkewn/flutter_server_box/actions/runs/37418767517 。尚未执行 iPhone 实机运行验证。发布前仍需执行移动设备 profile、触控与生命周期验证，并配置正式签名。
+未连接 Android 实机；初版 iOS 已在 GitHub macOS runner / Xcode 26.6 编译通过，新版界面由独立仓库 Actions 再次构建。尚未执行 iPhone 实机验证。发布前仍需执行移动设备 profile、触控与生命周期验证，并配置正式签名。

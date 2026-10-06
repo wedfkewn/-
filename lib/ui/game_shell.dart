@@ -5,6 +5,8 @@ import '../domain/content.dart';
 import '../domain/engine.dart';
 import 'details.dart';
 import 'karma_page.dart';
+import 'cultivation_page.dart';
+import 'ink_theme.dart';
 
 class GameShell extends ConsumerStatefulWidget {
   const GameShell({super.key, required this.toggleTheme});
@@ -14,7 +16,7 @@ class GameShell extends ConsumerStatefulWidget {
 }
 
 class _GameShellState extends ConsumerState<GameShell> {
-  int tab = 0, activity = 0;
+  int tab = 0, activity = -1;
   bool busy = false;
   Future<void> run(Future<void> Function() action) async {
     if (busy) {
@@ -70,7 +72,7 @@ class _GameShellState extends ConsumerState<GameShell> {
     IconData? icon,
   }) => Padding(
     padding: const EdgeInsets.only(right: 8, bottom: 8),
-    child: FilledButton.tonal(
+    child: OutlinedButton(
       onPressed: view.readOnly || busy
           ? null
           : () => command(
@@ -130,7 +132,7 @@ class _GameShellState extends ConsumerState<GameShell> {
       if (mounted) {
         setState(() {
           tab = 0;
-          activity = 0;
+          activity = -1;
         });
       }
     }
@@ -140,91 +142,112 @@ class _GameShellState extends ConsumerState<GameShell> {
   Widget build(BuildContext context) {
     final game = ref.watch(gameProvider);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('一世 · 仙途'),
-        actions: [
-          IconButton(
-            tooltip: '切换深浅主题',
-            onPressed: widget.toggleTheme,
-            icon: const Icon(Icons.brightness_6_outlined),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: game.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, st) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('存档读取失败：$e'),
-                  const Text('原存档保留，不会自动覆盖。'),
-                  TextButton(
-                    onPressed: () => ref.invalidate(gameProvider),
-                    child: const Text('重试'),
-                  ),
-                ],
+      appBar: tab == 0 && activity < 0 && game.asData?.value.exists == true
+          ? null
+          : AppBar(
+              leading: tab == 0 && activity >= 0
+                  ? IconButton(
+                      tooltip: '回到修行录',
+                      onPressed: () => setState(() => activity = -1),
+                      icon: const Icon(Icons.arrow_back),
+                    )
+                  : null,
+              title: Text(
+                tab == 0 ? '修行杂记' : const ['修行录', '山河志', '因果录', '万世碑'][tab],
               ),
+              actions: [
+                IconButton(
+                  tooltip: '切换深浅主题',
+                  onPressed: widget.toggleTheme,
+                  icon: const Icon(Icons.brightness_6_outlined),
+                ),
+              ],
             ),
-          ),
-          data: (v) {
-            if (!v.exists) {
-              return Center(
+      body: SafeArea(
+        child: PaperSurface(
+          child: game.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, st) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.landscape_outlined, size: 80),
-                    const SizedBox(height: 24),
-                    Text(
-                      '山河有因，众生有缘',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 12),
-                    const Text('一场可追溯的文字修仙人生'),
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: busy ? null : create,
-                      child: const Text('踏入仙途'),
+                    Text('存档读取失败：$e'),
+                    const Text('原存档保留，不会自动覆盖。'),
+                    TextButton(
+                      onPressed: () => ref.invalidate(gameProvider),
+                      child: const Text('重试'),
                     ),
                   ],
                 ),
-              );
-            }
-            return Stack(
-              children: [
-                switch (tab) {
-                  0 => cultivation(v),
-                  1 => world(v),
-                  2 => const KarmaPage(),
-                  _ => archives(v),
-                },
-                if (busy)
-                  const Align(
-                    alignment: Alignment.topCenter,
-                    child: LinearProgressIndicator(),
+              ),
+            ),
+            data: (v) {
+              if (!v.exists) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.landscape_outlined, size: 80),
+                      const SizedBox(height: 24),
+                      Text(
+                        '山河有因，众生有缘',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('一场可追溯的文字修仙人生'),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: busy ? null : create,
+                        child: const Text('踏入仙途'),
+                      ),
+                    ],
                   ),
-              ],
-            );
-          },
+                );
+              }
+              return Stack(
+                children: [
+                  switch (tab) {
+                    0 =>
+                      activity < 0
+                          ? CultivationPage(
+                              view: v,
+                              repository: ref
+                                  .read(gameProvider.notifier)
+                                  .repository!,
+                              busy: busy,
+                              onCommand: (kind) => command(
+                                kind,
+                                item: kind == 'useItem' ? '回春丹' : null,
+                              ),
+                              onWorld: () => setState(() => tab = 1),
+                              onWorkshop: (index) =>
+                                  setState(() => activity = index),
+                              onTheme: widget.toggleTheme,
+                            )
+                          : cultivation(v),
+                    1 => world(v),
+                    2 => const KarmaPage(),
+                    _ => archives(v),
+                  },
+                  if (busy)
+                    const Align(
+                      alignment: Alignment.topCenter,
+                      child: LinearProgressIndicator(),
+                    ),
+                ],
+              );
+            },
+          ),
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: tab,
-        onDestinationSelected: (value) => setState(() => tab = value),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.self_improvement),
-            label: '修行',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.landscape_outlined),
-            label: '世界',
-          ),
-          NavigationDestination(icon: Icon(Icons.hub_outlined), label: '因果'),
-          NavigationDestination(icon: Icon(Icons.history_edu), label: '万世碑'),
-        ],
+      bottomNavigationBar: InkNavigation(
+        index: tab,
+        onChanged: (value) => setState(() {
+          tab = value;
+          if (value == 0) activity = -1;
+        }),
       ),
     );
   }
@@ -234,55 +257,8 @@ class _GameShellState extends ConsumerState<GameShell> {
     child: Text(title, style: Theme.of(context).textTheme.titleLarge),
   );
   Widget cultivation(GameView v) => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(22),
     children: [
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${v.name} · ${v.realm}',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text('${v.date} · ${v.location}'),
-              Text('寿元 ${v.age} / ${v.lifespan} 岁 · 灵石 ${v.coins}'),
-              const SizedBox(height: 12),
-              LinearProgressIndicator(value: (v.hp / v.maxHp).clamp(0, 1)),
-              Text('气血 ${v.hp}/${v.maxHp} · 修为 ${v.spirit}'),
-              Text('神识 ${v.awareness}'),
-              Text('武器 ${v.weapon ?? '未装备'} · 护甲 ${v.armor ?? '未装备'}'),
-              if (v.readOnly)
-                const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: Text('此世已封存，所有游戏操作冻结。'),
-                ),
-              if (v.battleName != null)
-                Text('交战：${v.battleName} · 对方气血 ${v.battleHp}'),
-            ],
-          ),
-        ),
-      ),
-      if (v.battleName != null)
-        Wrap(
-          children: [
-            button(v, '攻击', 'attack'),
-            button(v, '功法（5修为）', 'skill'),
-            button(v, '服回春丹', 'useItem', item: '回春丹'),
-            button(v, '逃跑', 'flee'),
-          ],
-        )
-      else
-        Wrap(
-          children: [
-            button(v, '闭关30日', 'cultivate'),
-            button(v, '尝试突破', 'breakthrough'),
-            button(v, '静观30日', 'wait'),
-            button(v, '推演天机', 'divine'),
-          ],
-        ),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: SegmentedButton<int>(
@@ -433,78 +409,119 @@ class _GameShellState extends ConsumerState<GameShell> {
     ],
   );
   Widget world(GameView v) => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(22),
     children: [
-      heading(v.location),
-      const Text('行动会推进游戏时间，附近修士亦有自己的选择。'),
-      Wrap(
-        children: [button(v, '探索3日', 'explore'), button(v, '静观30日', 'wait')],
+      Text(
+        v.location,
+        style: Theme.of(
+          context,
+        ).textTheme.headlineSmall?.copyWith(fontSize: 38),
       ),
+      const SizedBox(height: 8),
+      const Text('行过山河，方知众生因缘。'),
+      const SizedBox(height: 18),
+      const Divider(),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                '寻访机缘',
+                style: TextStyle(fontFamily: 'MaShan', fontSize: 26),
+              ),
+            ),
+            InkAction(
+              label: '探索 · 3日',
+              onPressed: v.readOnly || busy ? null : () => command('explore'),
+            ),
+          ],
+        ),
+      ),
+      const Divider(),
       heading('山河行旅'),
       Wrap(
+        spacing: 4,
         children: v.places
             .map((n) => button(v, n.displayName, 'travel', target: n.id))
             .toList(),
       ),
       heading('宗门'),
       ...v.sects.map(
-        (n) => Card(
-          child: ListTile(
-            title: Text(n.displayName),
-            onTap: () => showNodeDetails(context, n),
-            trailing: TextButton(
-              onPressed: v.readOnly || busy || !n.alive
-                  ? null
-                  : () => command('joinSect', target: n.id),
-              child: const Text('拜入（20灵石）'),
+        (n) => Column(
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(n.displayName),
+              onTap: () => showNodeDetails(context, n),
+              trailing: TextButton(
+                onPressed: v.readOnly || busy || !n.alive
+                    ? null
+                    : () => command('joinSect', target: n.id),
+                child: const Text('拜入 · 20灵石'),
+              ),
             ),
-          ),
+            const Divider(),
+          ],
         ),
       ),
       heading('附近修士'),
-      if (v.nearby.isEmpty) const Text('此地暂未遇到修士。'),
+      const Text('轻触姓名，展开这一场相逢。', style: TextStyle(fontSize: 13)),
+      if (v.nearby.isEmpty)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Text('此地暂未遇到修士。'),
+        ),
       ...v.nearby.map(
-        (n) => Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        (n) => Column(
+          children: [
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 12),
+              title: Text(n.displayName, style: const TextStyle(fontSize: 20)),
+              subtitle: Text(n.description),
               children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(n.displayName),
-                  subtitle: Text(n.description),
-                  onTap: () => showNodeDetails(context, n),
-                ),
-                Wrap(
-                  children: [
-                    button(v, '救助', 'rescue', target: n.id),
-                    button(v, '结交', 'befriend', target: n.id),
-                    button(v, '拜师', 'apprentice', target: n.id),
-                    button(v, '立诺', 'promise', target: n.id),
-                    button(v, '借款', 'borrow', target: n.id),
-                    button(v, '还款', 'repay', target: n.id),
-                    button(v, '道侣', 'companion', target: n.id),
-                    button(v, '调查', 'investigate', target: n.id),
-                    button(v, '交战', 'startBattle', target: n.id),
-                    button(
-                      v,
-                      '秘密交战',
-                      'startBattle',
-                      target: n.id,
-                      secret: true,
-                    ),
-                  ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    children: [
+                      for (final action in const {
+                        '救助': 'rescue',
+                        '结交': 'befriend',
+                        '拜师': 'apprentice',
+                        '立诺': 'promise',
+                        '借款': 'borrow',
+                        '还款': 'repay',
+                        '道侣': 'companion',
+                        '调查': 'investigate',
+                        '交战': 'startBattle',
+                      }.entries)
+                        button(v, action.key, action.value, target: n.id),
+                      button(
+                        v,
+                        '秘密交战',
+                        'startBattle',
+                        target: n.id,
+                        secret: true,
+                      ),
+                      TextButton(
+                        onPressed: () => showNodeDetails(context, n),
+                        child: const Text('查看人物'),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
+            const Divider(),
+          ],
         ),
       ),
+      const SizedBox(height: 20),
     ],
   );
   Widget archives(GameView v) => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(22),
     children: [
       heading('万世碑'),
       const Text('每一世的山河与因果独立封存。'),

@@ -200,7 +200,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
               const Expanded(
                 child: Text(
                   '天机因果图',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontFamily: 'MaShan', fontSize: 28),
                 ),
               ),
               if (state.readOnly) const Chip(label: Text('历史只读')),
@@ -237,40 +237,43 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Wrap(
-            spacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              TextButton.icon(
-                onPressed: filters,
-                icon: const Icon(Icons.filter_alt_outlined),
-                label: const Text('筛选'),
-              ),
-              TextButton.icon(
-                onPressed: search,
-                icon: const Icon(Icons.search),
-                label: const Text('搜索'),
-              ),
-              TextButton.icon(
-                onPressed: reset,
-                icon: const Icon(Icons.my_location),
-                label: const Text('回到玩家'),
-              ),
-              DropdownButton<int>(
-                value: hops,
-                items: List.generate(
-                  5,
-                  (i) =>
-                      DropdownMenuItem(value: i + 1, child: Text('${i + 1}跳')),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                TextButton.icon(
+                  onPressed: filters,
+                  icon: const Icon(Icons.filter_alt_outlined),
+                  label: const Text('筛选'),
                 ),
-                onChanged: (v) => setState(() => hops = v!),
-              ),
-              IconButton(
-                tooltip: '自动整理布局',
-                onPressed: () => canvas.currentState?.organize(),
-                icon: const Icon(Icons.auto_awesome),
-              ),
-            ],
+                TextButton.icon(
+                  onPressed: search,
+                  icon: const Icon(Icons.search),
+                  label: const Text('搜索'),
+                ),
+                TextButton.icon(
+                  onPressed: reset,
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('回到玩家'),
+                ),
+                DropdownButton<int>(
+                  value: hops,
+                  items: List.generate(
+                    5,
+                    (i) => DropdownMenuItem(
+                      value: i + 1,
+                      child: Text('${i + 1}跳'),
+                    ),
+                  ),
+                  onChanged: (v) => setState(() => hops = v!),
+                ),
+                IconButton(
+                  tooltip: '自动整理布局',
+                  onPressed: () => canvas.currentState?.organize(),
+                  icon: const Icon(Icons.auto_awesome),
+                ),
+              ],
+            ),
           ),
         ),
         if (center != null) Text('中心：${repository.node(center!)!.displayName}'),
