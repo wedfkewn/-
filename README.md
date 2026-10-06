@@ -63,4 +63,4 @@ flutter build ios --no-codesign
 
 本次静态分析通过，31项自动化测试通过；规模测试最近一次索引约15ms，100次受限查询约77ms（Windows 测试环境，非手机帧率）。
 
-未连接 Android 实机；iOS 尚未在 macOS 编译和运行。发布前仍需执行移动设备 profile、触控与生命周期验证，并配置正式签名。
+未连接 Android 实机；相同游戏源码已在 GitHub macOS runner 上使用 Xcode 26.6 编译通过，生成未签名真机 IPA 与模拟器应用，31项测试全部通过。构建记录：https://github.com/wedfkewn/flutter_server_box/actions/runs/37418767517 。尚未执行 iPhone 实机运行验证。发布前仍需执行移动设备 profile、触控与生命周期验证，并配置正式签名。
