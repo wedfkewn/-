@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import '../domain/content.dart';
@@ -22,6 +23,10 @@ void showNodeDetails(BuildContext context, KarmaNode node) =>
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 12),
+                InkIllustration(
+                  art: IllustrationResolver.node(node),
+                  height: node.type == KarmaNodeType.npc ? 120 : null,
+                ),
                 Text(node.description),
                 const SizedBox(height: 8),
                 Text('${node.visibility} · ${node.alive ? '存续' : '已入历史'}'),
@@ -50,7 +55,8 @@ void showEventDetails(
           Text(event.title, style: Theme.of(context).textTheme.headlineSmall),
           Text('${Content.date(event.time)} · ${event.locationName}'),
           const SizedBox(height: 16),
-          Text(event.description),
+          const InkIllustration(art: 'wild_a'),
+          ExpandableNarrative(event.description),
           const Divider(),
           const Text('已知参与者'),
           Wrap(

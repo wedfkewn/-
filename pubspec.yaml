@@ -1,7 +1,7 @@
 name: xiuxian_app
 description: 离线文字修仙与动态因果长河
 publish_to: none
-version: 1.3.0+7
+version: 1.4.0+8
 environment:
   sdk: '>=3.11.0 <4.0.0'
 dependencies:
@@ -24,6 +24,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/illustrations/
     - assets/fonts/MaShanZheng-OFL.txt
     - assets/fonts/LXGWWenKai-OFL.txt
   fonts:

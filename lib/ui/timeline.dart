@@ -98,7 +98,11 @@ class _CausalTimelineState extends State<CausalTimeline> {
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(event.description),
+                  child: Text(
+                    event.description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 Wrap(
                   children: [

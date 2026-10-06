@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -434,11 +435,12 @@ class _EncounterPageState extends ConsumerState<EncounterPage> {
               ),
               Text(e.source == 'ai' ? '天机所述 · 结果经本地规则校验' : '山河所见'),
               const SizedBox(height: 18),
-              Text(e.text),
+              InkIllustration(art: IllustrationResolver.encounter(e, v!.map)),
+              ExpandableNarrative(e.text),
               const SizedBox(height: 22),
               ...e.options.map((o) {
                 final disabled =
-                    v!.readOnly ||
+                    v.readOnly ||
                     busy ||
                     v.coins < o.cost ||
                     o.pill && (v.inventory['回春丹'] ?? 0) < 1;
@@ -504,6 +506,11 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
   Widget build(BuildContext context) {
     final v = ref.watch(gameProvider).asData?.value;
     final request = ref.watch(aiRequestProvider);
+    final knownNpc = ref
+        .read(gameProvider.notifier)
+        .repository
+        ?.node(widget.npc);
+    final turns = v?.dialogue.where((t) => t.npc == widget.npc).toList() ?? [];
     return Scaffold(
       appBar: AppBar(title: Text('与${widget.name}交谈')),
       body: PaperSurface(
@@ -515,8 +522,29 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
               style: TextStyle(fontFamily: 'MaShan', fontSize: 28),
             ),
             const Text('每轮交谈耗时1日。人物言论不等于事实，结交与交易请使用正式行动。'),
-            ...?v?.dialogue
-                .where((t) => t.npc == widget.npc)
+            if (knownNpc != null)
+              InkIllustration(
+                art: IllustrationResolver.node(knownNpc),
+                height: 120,
+              ),
+            if (turns.length > 2)
+              ExpansionTile(
+                title: Text('此前交谈 · ${turns.length - 2}轮'),
+                children: turns
+                    .take(turns.length - 2)
+                    .map(
+                      (t) => ListTile(
+                        title: Text('你：${t.input}'),
+                        subtitle: ExpandableNarrative(
+                          '${widget.name}：${t.reply}',
+                          label: '展开言论',
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ...turns
+                .skip((turns.length - 2).clamp(0, turns.length))
                 .map(
                   (t) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),

@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'package:flutter/material.dart';
 import '../application/game_controller.dart';
 import '../domain/karma_repository.dart';
@@ -88,14 +89,9 @@ class CultivationPage extends StatelessWidget {
                     ],
                     stops: [0, .14, .88, 1],
                   ).createShader(bounds),
-                  child: Image.asset(
-                    'assets/images/cultivation-landscape.png',
-                    fit: BoxFit.cover,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xff62594a)
-                        : null,
-                    colorBlendMode: BlendMode.modulate,
-                    excludeFromSemantics: true,
+                  child: InkIllustration(
+                    art: IllustrationResolver.current(view.map),
+                    height: 160,
                   ),
                 ),
               ),

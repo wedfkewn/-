@@ -42,6 +42,12 @@ void main() {
 
   Future<void> capture(WidgetTester tester, String file) async {
     await tester.runAsync(() async {
+      for (final element in find.byType(Image).evaluate()) {
+        await precacheImage((element.widget as Image).image, element);
+      }
+    });
+    await tester.pump();
+    await tester.runAsync(() async {
       final image = await tester
           .renderObject<RenderRepaintBoundary>(
             find.byKey(const Key('save-capture')),
@@ -114,6 +120,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('一世因果'), findsOneWidget);
+      await capture(tester, 'illustrated-archive');
       await tester.tap(find.byTooltip('返回存档'));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)),

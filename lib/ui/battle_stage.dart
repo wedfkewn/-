@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../application/game_controller.dart';
@@ -127,6 +128,13 @@ class _BattleStageState extends State<BattleStage>
               height: 150,
               child: Stack(
                 children: [
+                  Positioned.fill(
+                    child: InkIllustration(
+                      art: IllustrationResolver.current(v.map),
+                      height: 150,
+                      opacity: .22,
+                    ),
+                  ),
                   Row(
                     children: [
                       seal('你', v.hp, false),

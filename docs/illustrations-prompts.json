@@ -1,0 +1,140 @@
+{
+  "tool": "Built-in image_gen.imagegen",
+  "style": "Use case: illustration-story. Standalone wide 2:1 horizontal vignette for an offline Chinese cultivation game. Chinese ink wash and pale watercolor, muted celadon green and ochre accents, expressive brushwork, restrained details. Warm ivory rice-paper background #f7f3e8. Generous empty paper above and below; scene concentrated in middle band, fading to paper on ALL FOUR edges. Atmospheric, timeless, no close-up faces. No text, no writing, no calligraphy, no logo, no border, no UI. Keep important elements within central 80 percent. Landscape 1024x512 display.",
+  "assets": [
+    {
+      "key": "town_a",
+      "subject": "Quiet ancient Chinese town beside a stream, grey tile roofs and bridge, pale green misty hills."
+    },
+    {
+      "key": "town_b",
+      "subject": "A quiet mountain village with terraced houses, a narrow path and a brook beneath green hills."
+    },
+    {
+      "key": "market_a",
+      "subject": "An ancient open-air market street, tiled shop awnings, baskets and pottery stalls, tiny indistinct distant figures, no signs."
+    },
+    {
+      "key": "market_b",
+      "subject": "A riverside trading wharf with wooden stalls, moored boats, jars and silk bundles, no writing."
+    },
+    {
+      "key": "sect_a",
+      "subject": "A secluded cultivation sect mountain compound, pavilion roofs among pine trees, stone stairs disappearing into mist."
+    },
+    {
+      "key": "sect_b",
+      "subject": "A peaceful mountain monastery courtyard with a moon gate, bamboo and distant cliffs."
+    },
+    {
+      "key": "wild_a",
+      "subject": "A wild forest valley, winding rocky trail, pines and mist, no buildings."
+    },
+    {
+      "key": "wild_b",
+      "subject": "An ochre grassland with rugged distant ridges, a lone wind-shaped tree and a wandering path."
+    },
+    {
+      "key": "vein_a",
+      "subject": "A tranquil spiritual spring flowing between mossy rocks, faint green glow, bamboo."
+    },
+    {
+      "key": "vein_b",
+      "subject": "A cave entrance with subtle luminous mineral crystals, a stream and ancient roots, pale celadon."
+    },
+    {
+      "key": "ruin_a",
+      "subject": "Ancient broken stone pillars on a mountain ridge, weathered blank stone monument and creeping vines."
+    },
+    {
+      "key": "ruin_b",
+      "subject": "An abandoned temple among rocky cliffs, collapsed walls, steps and tall grasses, no writing."
+    },
+    {
+      "key": "secret_a",
+      "subject": "A secluded narrow gorge leading toward a softly glowing mist gate, cliff vegetation, understated fantasy."
+    },
+    {
+      "key": "secret_b",
+      "subject": "A hidden island pavilion beyond a misty lake and mountain archway, no visible treasures."
+    },
+    {
+      "key": "tribulation_a",
+      "subject": "A circular empty stone platform on a windswept mountaintop beneath dark ink clouds and one thin lightning bolt."
+    },
+    {
+      "key": "tribulation_b",
+      "subject": "A high cliff stone altar with concentric stone slabs, rising mist and distant storm clouds, no symbols or text."
+    },
+    {
+      "key": "encounter_herbs",
+      "subject": "A patch of wild medicinal herbs and delicate leaves sheltered under mossy rocks beside a stream."
+    },
+    {
+      "key": "encounter_treasure",
+      "subject": "An old mountain road with a weathered small wooden chest tucked near tree roots, no gold explosion."
+    },
+    {
+      "key": "encounter_rescue",
+      "subject": "A distant cloaked traveler sitting exhausted against a rock, beside a mountain path, face and gender indeterminate, no blood."
+    },
+    {
+      "key": "encounter_tablet",
+      "subject": "A cracked ancient blank stone tablet with weathered surface, vines and fallen leaves, ABSOLUTELY NO lettering or marks resembling writing."
+    },
+    {
+      "key": "encounter_escort",
+      "subject": "A small wooden merchant wagon and bundled goods on a winding mountain trail, tiny indistinct cloaked figures."
+    },
+    {
+      "key": "encounter_weapon",
+      "subject": "A weathered Chinese straight sword in its scabbard lying among reeds and stones by an old trail."
+    },
+    {
+      "key": "encounter_ambush",
+      "subject": "A narrow rocky valley path with ominous deep ink shadows and wind-swept bamboo, no visible attackers."
+    },
+    {
+      "key": "encounter_spring",
+      "subject": "A clear mountain spring under pale green willow branches and mossy stone, faint ethereal ripples."
+    },
+    {
+      "key": "portrait_a",
+      "subject": "A small anonymous cloaked cultivator silhouette, head in shadow, seen from back three-quarter view, no visible face, age or gender. Minimal mist and bamboo, centered full upper body."
+    },
+    {
+      "key": "portrait_b",
+      "subject": "An anonymous robed cultivator silhouette seated beside a pine branch, head concealed by a simple hood, no identifiable face, age, gender or equipment. Centered upper body."
+    },
+    {
+      "key": "portrait_c",
+      "subject": "An anonymous hooded traveling cultivator silhouette amid soft mist, face fully obscured, no weapon, no age or gender, centered upper body."
+    },
+    {
+      "key": "portrait_d",
+      "subject": "An anonymous loosely robed cultivator silhouette standing by a blank stone wall and bamboo, hood conceals entire face, no age or gender, centered upper body."
+    },
+    {
+      "key": "feature_birth",
+      "subject": "A tiny anonymous robed traveler stepping through a mountain pass toward vast layered misty peaks, conveying a new beginning."
+    },
+    {
+      "key": "feature_equipment",
+      "subject": "Still life of a Chinese straight sword in scabbard and folded simple protective lamellar armor on a flat rock, pine sprig."
+    },
+    {
+      "key": "feature_alchemy",
+      "subject": "A small ancient bronze alchemy furnace, clay herb jars and medicinal leaves, thin drifting vapor, no fire spectacle."
+    },
+    {
+      "key": "feature_archive",
+      "subject": "A quiet grove of blank weathered stone memorial steles among pines and pale distant mountains, solemn but peaceful, no inscription."
+    }
+  ],
+  "encoding": {
+    "format": "WebP",
+    "maxWidth": 1024,
+    "maxHeight": 512,
+    "quality": 78
+  }
+}

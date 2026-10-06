@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/game_controller.dart';
@@ -113,6 +114,7 @@ class _CreationPageState extends ConsumerState<CreationPage> {
           child: ListView(
             padding: const EdgeInsets.all(22),
             children: [
+              const InkIllustration(art: 'feature_birth'),
               TextField(
                 controller: name,
                 maxLength: 20,

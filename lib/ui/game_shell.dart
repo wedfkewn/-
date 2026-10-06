@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -75,8 +76,14 @@ class _GameShellState extends ConsumerState<GameShell>
           child: InkDialog(
             canClose: false,
             title: const Text('此世已终'),
-            content: Text(
-              '${after.name}已陨落。\n这一世的世界、因果图谱与长河已封存于万世碑。\n人生影响 ${after.assessment?['score'] ?? 0} · 下一世可分配 ${after.rebirth.points} 点。',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const InkIllustration(art: 'feature_archive', height: 90),
+                Text(
+                  '${after.name}已陨落。\n这一世的世界、因果图谱与长河已封存于万世碑。\n人生影响 ${after.assessment?['score'] ?? 0} · 下一世可分配 ${after.rebirth.points} 点。',
+                ),
+              ],
             ),
             actions: [
               FilledButton(
@@ -228,12 +235,19 @@ class _GameShellState extends ConsumerState<GameShell>
       context: context,
       builder: (ctx) => InkDialog(
         title: Text(e.name),
-        content: Text(
-          '${Content.realms[e.realm]}可用 · ${e.description}\n替换后普通出手 ${delta(attackDifference)} · 减伤 ${delta(defense(e) - defense(old))} · 灵力 ${delta(qi(e) - qi(old))}\n${e.realm > v.realmIndex
-              ? '境界不足，不能装备'
-              : equipped
-              ? '已装备'
-              : '可装备'}',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const InkIllustration(art: 'feature_equipment', height: 140),
+            Text(
+              '${Content.realms[e.realm]}可用 · ${e.description}\n替换后普通出手 ${delta(attackDifference)} · 减伤 ${delta(defense(e) - defense(old))} · 灵力 ${delta(qi(e) - qi(old))}\n${e.realm > v.realmIndex
+                  ? '境界不足，不能装备'
+                  : equipped
+                  ? '已装备'
+                  : '可装备'}',
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -511,6 +525,14 @@ class _GameShellState extends ConsumerState<GameShell>
         ...v.equipment.map(
           (e) => ListTile(
             contentPadding: EdgeInsets.zero,
+            leading: const SizedBox(
+              width: 48,
+              child: InkIllustration(
+                art: 'feature_equipment',
+                height: 48,
+                compact: true,
+              ),
+            ),
             title: Text(
               '${e.name} · ${Content.realms[e.realm]} · ${Equipment.qualities[e.quality]}',
               style: TextStyle(
@@ -527,7 +549,9 @@ class _GameShellState extends ConsumerState<GameShell>
             ),
             onTap: () => equipmentDetails(v, e),
             subtitle: Text(
-              '${e.description}\n当前：${v.equipment.where((current) => current.id == (e.slot == 'weapon' ? v.weaponId : v.armorId)).firstOrNull?.description ?? '无'}',
+              e.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
             trailing: TextButton(
               onPressed:
@@ -583,6 +607,7 @@ class _GameShellState extends ConsumerState<GameShell>
             ),
       ] else if (activity == 1) ...[
         heading('炼丹'),
+        const InkIllustration(art: 'feature_alchemy'),
         Wrap(
           children: Content.recipes.entries
               .map(
@@ -596,6 +621,7 @@ class _GameShellState extends ConsumerState<GameShell>
               .toList(),
         ),
         heading('坊市'),
+        const InkIllustration(art: 'market_a'),
         ...Content.prices.entries
             .where(
               (e) =>
@@ -717,6 +743,7 @@ class _GameShellState extends ConsumerState<GameShell>
         ).textTheme.headlineSmall?.copyWith(fontSize: 38),
       ),
       const SizedBox(height: 8),
+      InkIllustration(art: IllustrationResolver.current(v.map)),
       const Text('行过山河，方知众生因缘。'),
       if (v.encounter != null)
         FilledButton(
@@ -795,7 +822,19 @@ class _GameShellState extends ConsumerState<GameShell>
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(bottom: 12),
               title: Text(n.displayName, style: const TextStyle(fontSize: 20)),
-              subtitle: Text(n.description),
+              subtitle: Text(
+                n.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              leading: SizedBox(
+                width: 48,
+                child: InkIllustration(
+                  art: IllustrationResolver.node(n),
+                  height: 48,
+                  compact: true,
+                ),
+              ),
               children: [
                 Align(
                   alignment: Alignment.centerLeft,
@@ -858,6 +897,7 @@ class _GameShellState extends ConsumerState<GameShell>
     padding: const EdgeInsets.all(22),
     children: [
       heading('万世碑'),
+      const InkIllustration(art: 'feature_archive'),
       TextButton.icon(
         onPressed: busy ? null : returnToSaves,
         icon: const Icon(Icons.arrow_back),

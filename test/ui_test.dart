@@ -132,6 +132,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('世界').last);
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('附近修士'), 180, scrollable: find.byType(Scrollable).first);
       expect(find.text('附近修士'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.text('因果').last);

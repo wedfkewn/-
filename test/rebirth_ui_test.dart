@@ -41,6 +41,12 @@ void main() {
 
   Future<void> capture(WidgetTester tester, String file) async {
     await tester.runAsync(() async {
+      for (final element in find.byType(Image).evaluate()) {
+        await precacheImage((element.widget as Image).image, element);
+      }
+    });
+    await tester.pump();
+    await tester.runAsync(() async {
       final image = await tester
           .renderObject<RenderRepaintBoundary>(find.byKey(const Key('capture')))
           .toImage(pixelRatio: 2);
@@ -86,7 +92,10 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const XiuxianApp(),
+          child: const RepaintBoundary(
+            key: Key('capture'),
+            child: XiuxianApp(),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -105,6 +114,7 @@ void main() {
       await tester.tap(find.text('青锋剑 · 炼气 · 上品'));
       await tester.pumpAndSettle();
       expect(find.textContaining('普通出手 +10'), findsOneWidget);
+      await capture(tester, 'illustrated-equipment');
       await tester.tap(find.text('出售 · 30灵石'));
       await tester.pumpAndSettle();
       expect(find.text('确认出售'), findsNWidgets(2));
@@ -171,6 +181,8 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       for (var i = 0; i < 4; i++) {
+        await tester.ensureVisible(find.byTooltip('增加根骨'));
+        await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('增加根骨'));
         await tester.pump();
       }

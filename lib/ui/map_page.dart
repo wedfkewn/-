@@ -1,3 +1,4 @@
+import 'illustrations.dart';
 import 'ink_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,6 +73,7 @@ class _MapPageState extends ConsumerState<MapPage> {
                   known.name,
                   style: const TextStyle(fontFamily: 'MaShan', fontSize: 30),
                 ),
+                InkIllustration(art: IllustrationResolver.place(known)),
                 Text('${p.regionName} · ${p.kind.label} · ${p.terrain}'),
                 if (!known.confirmed) const Text('待查证：尚不能规划行旅'),
                 Text(
@@ -220,6 +222,8 @@ class _MapPageState extends ConsumerState<MapPage> {
                 onPressed: () => setState(() => region = null),
                 child: const Text('返回天下'),
               ),
+            if (region == null)
+              const InkIllustration(art: 'wild_a', height: 90),
             Text('所在：${v.location} · ${Content.date(v.day)}'),
             TextField(
               decoration: const InputDecoration(labelText: '搜索已知地点'),
