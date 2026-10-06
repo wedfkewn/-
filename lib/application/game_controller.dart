@@ -6,6 +6,7 @@ import '../domain/content.dart';
 import '../domain/engine.dart';
 import '../domain/karma_repository.dart';
 import '../domain/models.dart';
+import '../domain/map_repository.dart';
 import 'ai_service.dart';
 
 final databaseProvider = Provider<GameDatabase>(
@@ -64,6 +65,10 @@ class GameView {
     this.armorId,
     this.aiNotice = '',
     this.archives = const [],
+    this.map = const MapView(),
+    this.growth = const GrowthView(),
+    this.inTribulation = false,
+    this.secretStage,
   });
   final bool exists, readOnly;
   final String name, date, seed, realm, location, playerId;
@@ -90,6 +95,10 @@ class GameView {
   final String omen, style, aiNotice;
   final String? weaponId, armorId;
   final List<LifeArchive> archives;
+  final MapView map;
+  final GrowthView growth;
+  final bool inTribulation;
+  final int? secretStage;
 }
 
 class LifeArchive {
@@ -107,11 +116,30 @@ class GameController extends AsyncNotifier<GameView> {
   bool _viewingArchive = false;
   List<LifeArchive> _archives = [];
   KarmaRepository? get repository => _repository;
+  List<MapRoad>? previewRoute(String target) =>
+      _world == null ? null : MapRepository(_world!).route(target);
+  GrowthView previewGrowth({String? guard, bool pill = false}) => _world == null
+      ? const GrowthView()
+      : GrowthRules.view(_world!, guard: guard, pill: pill);
   @override
   Future<GameView> build() async {
     final service = ref.read(aiServiceProvider);
     ref.onDispose(service.cancel);
     _world = await ref.read(databaseProvider).load();
+    if (_world != null && !_world!.frozen && _world!.mapVersion == 0) {
+      final next = _world!.copy();
+      MapRules.generate(next);
+      for (final n
+          in next.entities.values
+              .where((e) => e.type == KarmaNodeType.npc)
+              .toList()) {
+        MapRules.revealNearby(next, n.id, InformationChannel.witness);
+      }
+      next.rulesVersion = Content.version;
+      next.revision++;
+      await ref.read(databaseProvider).save(next, previous: _world);
+      _world = next;
+    }
     if (_world?.pendingAi != null && !_world!.frozen) {
       final pending = _world!.pendingAi!;
       final next = GameCommandService().execute(
@@ -171,7 +199,9 @@ class GameController extends AsyncNotifier<GameView> {
       name: p.name,
       date: Content.date(w.day),
       seed: w.seed,
-      realm: Content.realms[p.realm],
+      realm: w.frozen && w.mapVersion == 0
+          ? Content.realms[p.realm]
+          : '${Content.realms[p.realm]}${Content.stages[p.stage]}',
       location: w.entities[p.location]!.name,
       age: p.ageDays ~/ 360,
       day: w.day,
@@ -186,6 +216,10 @@ class GameController extends AsyncNotifier<GameView> {
       ),
       coins: p.coins,
       realmIndex: p.realm,
+      map: MapRepository(w).query(),
+      growth: GrowthRules.view(w),
+      inTribulation: w.tribulation != null,
+      secretStage: w.secretRun?.stage,
       revision: w.revision,
       inventory: Map.unmodifiable(w.inventory),
       techniques: List.unmodifiable(w.techniques),
@@ -197,7 +231,9 @@ class GameController extends AsyncNotifier<GameView> {
       playerId: p.id,
       weapon: w.weapon,
       armor: w.armor,
-      battleName: w.battleTarget == null
+      battleName: w.tribulation != null
+          ? '天劫 · 第${w.tribulation!.turn + 1}道'
+          : w.battleTarget == null
           ? null
           : _repository!.node(w.battleTarget!)?.displayName,
       battleHp: w.battleHp,
@@ -205,7 +241,9 @@ class GameController extends AsyncNotifier<GameView> {
       equipment: List.unmodifiable(w.equipment.values),
       dialogue: List.unmodifiable(w.dialogue),
       battleQi: w.battleQi,
-      omen: AdventureRules.omen(w),
+      omen: w.tribulation == null
+          ? AdventureRules.omen(w)
+          : GrowthRules.omen(w),
       style: w.style,
       weaponId: w.weaponId,
       armorId: w.armorId,
@@ -214,7 +252,13 @@ class GameController extends AsyncNotifier<GameView> {
     );
   }
 
-  Future<void> create(String name, String seed) async {
+  Future<void> create(
+    String name,
+    String seed, {
+    int regionCount = 12,
+    int placesPerRegion = 24,
+    int npcCount = 1200,
+  }) async {
     if (_busy) {
       throw const RuleViolation('正在保存，请稍候');
     }
@@ -235,6 +279,9 @@ class GameController extends AsyncNotifier<GameView> {
             ? DateTime.now().microsecondsSinceEpoch.toString()
             : seed.trim(),
         name: name,
+        regionCount: regionCount,
+        placesPerRegion: placesPerRegion,
+        npcCount: npcCount,
         worldId: 'life-${DateTime.now().microsecondsSinceEpoch}',
       );
       await ref.read(databaseProvider).save(next, makeActive: true);
@@ -381,6 +428,9 @@ class GameController extends AsyncNotifier<GameView> {
           !next.frozen &&
           next.encounter == null &&
           next.battleTarget == null &&
+          next.tribulation == null &&
+          next.secretRun == null &&
+          next.day ~/ 30 > original.day ~/ 30 &&
           next.day ~/ 30 > next.aiWorldDay ~/ 30) {
         next.aiWorldDay = next.day;
         if (AdventureRules.worldCatalog(next).isNotEmpty) {

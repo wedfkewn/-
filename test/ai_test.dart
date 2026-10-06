@@ -291,7 +291,7 @@ void main() {
       await tester.enterText(field('API 密钥'), 'temporary-secret');
       await tester.runAsync(() async {
         await tester.tap(find.text('检测模型'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 500));
       });
       await tester.pumpAndSettle();
       expect(find.text('选择模型 · 2 个'), findsOneWidget);

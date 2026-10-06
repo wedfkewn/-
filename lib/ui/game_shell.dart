@@ -8,6 +8,8 @@ import 'karma_page.dart';
 import 'cultivation_page.dart';
 import 'ink_theme.dart';
 import 'ai_pages.dart';
+import 'map_page.dart';
+import 'growth_page.dart';
 import '../application/ai_service.dart';
 
 class GameShell extends ConsumerStatefulWidget {
@@ -145,36 +147,83 @@ class _GameShellState extends ConsumerState<GameShell>
   Future<void> create() async {
     final name = TextEditingController(text: '李长生');
     final seed = TextEditingController();
+    var regionCount = 12, placesPerRegion = 24, npcCount = 1200;
     final choice = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('踏入仙途'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: name,
-              maxLength: 20,
-              decoration: const InputDecoration(labelText: '道号'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('踏入仙途'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: name,
+                  maxLength: 20,
+                  decoration: const InputDecoration(labelText: '道号'),
+                ),
+                TextField(
+                  controller: seed,
+                  maxLength: 100,
+                  decoration: const InputDecoration(labelText: '世界种子（留空随机）'),
+                ),
+                const Text('种子决定初始条件，行动决定后续历史。身死后这一世永久结束。'),
+                ExpansionTile(
+                  title: const Text('世界规模'),
+                  subtitle: Text(
+                    '$regionCount州 · ${regionCount * placesPerRegion}处地点 · $npcCount名NPC',
+                  ),
+                  children: [
+                    DropdownButtonFormField<int>(
+                      initialValue: regionCount,
+                      decoration: const InputDecoration(labelText: '州域数量'),
+                      items: [6, 12, 24]
+                          .map(
+                            (n) =>
+                                DropdownMenuItem(value: n, child: Text('$n州')),
+                          )
+                          .toList(),
+                      onChanged: (value) => update(() => regionCount = value!),
+                    ),
+                    DropdownButtonFormField<int>(
+                      initialValue: placesPerRegion,
+                      decoration: const InputDecoration(labelText: '每州地点'),
+                      items: [16, 24, 32]
+                          .map(
+                            (n) =>
+                                DropdownMenuItem(value: n, child: Text('$n处')),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          update(() => placesPerRegion = value!),
+                    ),
+                    DropdownButtonFormField<int>(
+                      initialValue: npcCount,
+                      decoration: const InputDecoration(labelText: '修士数量'),
+                      items: [600, 1200, 5000]
+                          .map(
+                            (n) =>
+                                DropdownMenuItem(value: n, child: Text('$n名')),
+                          )
+                          .toList(),
+                      onChanged: (value) => update(() => npcCount = value!),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            TextField(
-              controller: seed,
-              maxLength: 100,
-              decoration: const InputDecoration(labelText: '世界种子（留空随机）'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('返回'),
             ),
-            const Text('种子决定初始条件，行动决定后续历史。\n身死后这一世永久结束。'),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('开始修行'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('返回'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('开始修行'),
-          ),
-        ],
       ),
     );
     final chosenName = name.text, chosenSeed = seed.text;
@@ -184,7 +233,15 @@ class _GameShellState extends ConsumerState<GameShell>
     });
     if (choice == true && mounted) {
       await run(
-        () => ref.read(gameProvider.notifier).create(chosenName, chosenSeed),
+        () => ref
+            .read(gameProvider.notifier)
+            .create(
+              chosenName,
+              chosenSeed,
+              regionCount: regionCount,
+              placesPerRegion: placesPerRegion,
+              npcCount: npcCount,
+            ),
       );
       if (mounted) {
         setState(() {
@@ -285,10 +342,17 @@ class _GameShellState extends ConsumerState<GameShell>
                                   .read(gameProvider.notifier)
                                   .repository!,
                               busy: busy,
-                              onCommand: (kind) => command(
-                                kind,
-                                item: kind == 'useItem' ? '回春丹' : null,
-                              ),
+                              onCommand: (kind) => kind == 'breakthrough'
+                                  ? Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => const GrowthPage(),
+                                      ),
+                                    )
+                                  : command(
+                                      kind,
+                                      item: kind == 'useItem' ? '回春丹' : null,
+                                    ),
                               onWorld: () => setState(() => tab = 1),
                               onWorkshop: (index) =>
                                   setState(() => activity = index),
@@ -437,43 +501,53 @@ class _GameShellState extends ConsumerState<GameShell>
               .toList(),
         ),
         heading('坊市'),
-        ...Content.prices.entries.map(
-          (e) => Card(
-            child: ListTile(
-              title: Text(e.key),
-              subtitle: Text('${e.value}灵石 · 出售半价'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: '购买${e.key}',
-                    onPressed: v.readOnly || busy
-                        ? null
-                        : () => command('trade', item: e.key),
-                    icon: const Icon(Icons.add_shopping_cart),
+        ...Content.prices.entries
+            .where(
+              (e) =>
+                  !MapRules.materials.contains(e.key) ||
+                  v.map.places.any(
+                    (p) =>
+                        p.place.id == v.map.current &&
+                        p.place.resources.contains(e.key),
                   ),
-                  IconButton(
-                    tooltip: '出售${e.key}',
-                    onPressed:
-                        v.readOnly ||
-                            busy ||
-                            (['青锋剑', '玄铁甲'].contains(e.key)
-                                ? !v.equipment.any(
-                                    (item) =>
-                                        item.name == e.key &&
-                                        item.id != v.weaponId &&
-                                        item.id != v.armorId,
-                                  )
-                                : (v.inventory[e.key] ?? 0) < 1)
-                        ? null
-                        : () => command('trade', item: e.key, amount: -1),
-                    icon: const Icon(Icons.sell_outlined),
+            )
+            .map(
+              (e) => Card(
+                child: ListTile(
+                  title: Text(e.key),
+                  subtitle: Text('${e.value}灵石 · 出售半价'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: '购买${e.key}',
+                        onPressed: v.readOnly || busy
+                            ? null
+                            : () => command('trade', item: e.key),
+                        icon: const Icon(Icons.add_shopping_cart),
+                      ),
+                      IconButton(
+                        tooltip: '出售${e.key}',
+                        onPressed:
+                            v.readOnly ||
+                                busy ||
+                                (['青锋剑', '玄铁甲'].contains(e.key)
+                                    ? !v.equipment.any(
+                                        (item) =>
+                                            item.name == e.key &&
+                                            item.id != v.weaponId &&
+                                            item.id != v.armorId,
+                                      )
+                                    : (v.inventory[e.key] ?? 0) < 1)
+                            ? null
+                            : () => command('trade', item: e.key, amount: -1),
+                        icon: const Icon(Icons.sell_outlined),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
       ] else ...[
         heading('奇遇与宗门委托'),
         if (v.quests.isEmpty) const Text('探索可能发现古碑；加入宗门可领取委托。'),
@@ -582,11 +656,13 @@ class _GameShellState extends ConsumerState<GameShell>
       ),
       const Divider(),
       heading('山河行旅'),
-      Wrap(
-        spacing: 4,
-        children: v.places
-            .map((n) => button(v, n.displayName, 'travel', target: n.id))
-            .toList(),
+      OutlinedButton.icon(
+        icon: const Icon(Icons.map_outlined),
+        label: const Text('展开山河地图'),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const MapPage()),
+        ),
       ),
       heading('宗门'),
       ...v.sects.map(

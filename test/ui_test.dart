@@ -124,7 +124,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('李长生 · 炼气'), findsOneWidget);
+      expect(find.text('李长生 · 炼气初期'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('切换深浅主题'));
       await tester.pumpAndSettle();

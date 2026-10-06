@@ -7,6 +7,18 @@ import 'package:xiuxian_app/domain/models.dart';
 
 World fresh() =>
     WorldGenerator.generate(seed: 'gameplay', worldId: 'game', npcCount: 20);
+World walk(World w, String target) {
+  final c = GameCommandService();
+  w = c.execute(w, GameCommand('planRoute', target: target));
+  while (w.journey != null) {
+    w = c.execute(w, const GameCommand('moveStep'));
+    if (w.encounter != null) {
+      w = c.execute(w, const GameCommand('chooseEncounter', item: 'leave'));
+    }
+  }
+  return w;
+}
+
 void main() {
   test(
     'cultivation, breakthrough, pills, crafting, trade, equipment and techniques have real effects',
@@ -31,13 +43,34 @@ void main() {
       for (var i = 0; i < 3; i++) {
         w = c.execute(w, const GameCommand('cultivate'));
       }
-      for (var i = 0; i < 3 && w.player.realm == 0; i++) {
-        w = c.execute(w, const GameCommand('breakthrough'));
-        if (w.player.realm == 0) {
-          for (var j = 0; j < 3; j++) {
-            w = c.execute(w, const GameCommand('cultivate'));
-          }
+      while (w.player.stage < 3) {
+        while (w.player.foundation < GrowthRules.rootRequired(w.player)) {
+          w = c.execute(w, const GameCommand('stabilize'));
         }
+        while (w.player.spirit <
+            Content.threshold(w.player.realm, w.player.stage)) {
+          w = c.execute(w, const GameCommand('cultivate'));
+        }
+        w = c.execute(w, const GameCommand('advanceStage'));
+      }
+      w = walk(w, 'game:location:1');
+      w = c.execute(w, const GameCommand('contemplate'));
+      w = c.execute(w, const GameCommand('gather', item: '筑基丹'));
+      w = walk(w, 'game:location:0');
+      for (var attempt = 0; attempt < 10 && w.player.realm == 0; attempt++) {
+        while (w.player.foundation < 100 || GrowthRules.injured(w, w.player)) {
+          w = c.execute(w, const GameCommand('stabilize'));
+        }
+        while (w.player.spirit <
+            Content.threshold(w.player.realm, w.player.stage)) {
+          w = c.execute(w, const GameCommand('cultivate'));
+        }
+        if ((w.inventory['筑基丹'] ?? 0) == 0) {
+          w = walk(w, 'game:location:1');
+          w = c.execute(w, const GameCommand('gather', item: '筑基丹'));
+          w = walk(w, 'game:location:0');
+        }
+        w = c.execute(w, const GameCommand('breakthrough'));
       }
       expect(w.player.realm, 1);
       expect(Content.lifespans[w.player.realm], greaterThan(120));
@@ -93,7 +126,8 @@ void main() {
       b = c.execute(b, command);
     }
     expect(jsonEncode(a.toJson()), jsonEncode(b.toJson()));
-    expect(a.events.values.any((e) => e.kind == 'npcBreakthrough'), true);
+    expect(a.events.values.any((e) => e.kind == 'npcCultivate'), true);
+    expect(a.events.values.any((e) => e.kind == 'npcContemplate'), true);
     expect(
       a.events.values.any(
         (e) =>
@@ -251,7 +285,7 @@ void main() {
       final rescue = w.events.values.singleWhere((e) => e.kind == 'rescue');
       for (
         var i = 0;
-        i < 12 && !w.events.values.any((e) => e.kind == 'repayment');
+        i < 180 && !w.events.values.any((e) => e.kind == 'repayment');
         i++
       ) {
         w = c.execute(w, const GameCommand('wait'));
@@ -284,16 +318,24 @@ void main() {
       );
       // Die to an actual stronger opponent; no injected death or demo record.
       final enemy = w.entities.values.firstWhere(
-        (e) => e.type == KarmaNodeType.npc && e.alive && e.realm >= 2,
+        (e) =>
+            e.type == KarmaNodeType.npc &&
+            e.alive &&
+            e.realm > w.player.realm &&
+            e.location == w.player.location &&
+            w.knows(w.playerId, e.id),
       );
-      w = c.execute(w, GameCommand('travel', target: enemy.location));
       w = c.execute(w, GameCommand('startBattle', target: enemy.id));
       for (var i = 0; i < 30 && !w.frozen; i++) {
         if (w.battleTarget == null) {
           final next = w.entities.values.firstWhere(
-            (e) => e.type == KarmaNodeType.npc && e.alive && e.realm >= 2,
+            (e) =>
+                e.type == KarmaNodeType.npc &&
+                e.alive &&
+                e.realm > w.player.realm &&
+                e.location == w.player.location &&
+                w.knows(w.playerId, e.id),
           );
-          w = c.execute(w, GameCommand('travel', target: next.location));
           w = c.execute(w, GameCommand('startBattle', target: next.id));
         }
         w = c.execute(w, const GameCommand('attack'));

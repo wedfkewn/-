@@ -35,7 +35,7 @@ void main() {
       final rescue = w.events.values.singleWhere((e) => e.kind == 'rescue');
       for (
         var i = 0;
-        i < 12 && !w.events.values.any((e) => e.kind == 'repayment');
+        i < 180 && !w.events.values.any((e) => e.kind == 'repayment');
         i++
       ) {
         await act(const GameCommand('wait'));
@@ -51,16 +51,24 @@ void main() {
         true,
       );
       final enemy = w.entities.values.firstWhere(
-        (n) => n.type == KarmaNodeType.npc && n.alive && n.realm >= 2,
+        (n) =>
+            n.type == KarmaNodeType.npc &&
+            n.alive &&
+            n.realm > w.player.realm &&
+            n.location == w.player.location &&
+            w.knows(w.playerId, n.id),
       );
-      await act(GameCommand('travel', target: enemy.location));
       await act(GameCommand('startBattle', target: enemy.id));
       for (var i = 0; i < 30 && !w.frozen; i++) {
         if (w.battleTarget == null) {
           final next = w.entities.values.firstWhere(
-            (n) => n.type == KarmaNodeType.npc && n.alive && n.realm >= 2,
+            (n) =>
+                n.type == KarmaNodeType.npc &&
+                n.alive &&
+                n.realm > w.player.realm &&
+                n.location == w.player.location &&
+                w.knows(w.playerId, n.id),
           );
-          await act(GameCommand('travel', target: next.location));
           await act(GameCommand('startBattle', target: next.id));
         }
         await act(const GameCommand('attack'));

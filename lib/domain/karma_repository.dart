@@ -190,7 +190,7 @@ class KarmaRepository {
       visibility: k.channel == InformationChannel.divination ? '天机已确认' : '已知',
       description: character
           ? (present
-                ? '${Content.realms[n.realm]} · ${n.personality} · ${_world.entities[n.location]?.name ?? '远方'}'
+                ? '${Content.realms[n.realm]}${Content.stages[n.stage]} · ${n.personality} · ${_world.entities[n.location]?.name ?? '远方'}'
                 : '曾经结识的修士 · 当前行踪未确认')
           : n.type == KarmaNodeType.sect
           ? '修仙势力 · ${(k.snapshot['alive'] as bool? ?? true) ? '传承延续' : '已覆灭'}'

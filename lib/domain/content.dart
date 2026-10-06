@@ -1,6 +1,20 @@
 /// Versioned rules. Costs are game days, never wall-clock time.
 abstract final class Content {
-  static const version = 2;
+  static const version = 3;
+  static const stages = ['初期', '中期', '后期', '圆满'];
+  static const cultivationThresholds = [
+    80,
+    180,
+    400,
+    850,
+    1600,
+    2800,
+    4500,
+    7000,
+    10000,
+  ];
+  static int threshold(int realm, int stage) =>
+      (cultivationThresholds[realm] * (1 + stage * .25)).ceil();
   static int awareness(int realm, int spirit, bool hasTianji) =>
       10 + realm * 20 + (spirit ~/ 10).clamp(0, 40) + (hasTianji ? 20 : 0);
   static const questDescriptions = {
@@ -23,7 +37,7 @@ abstract final class Content {
   static const sects = ['苍玄宗', '天剑宗', '血河宗'];
   static const families = ['沈家', '顾家', '林家', '韩家'];
   static const techniques = {'长春诀': 3, '天机诀': 5, '御剑诀': 7};
-  static const recipes = {'回春丹': 2, '聚灵丹': 3};
+  static const recipes = {'回春丹': 2, '聚灵丹': 3, '护脉丹': 5};
   static const prices = {
     '灵草': 4,
     '回春丹': 12,
@@ -32,12 +46,33 @@ abstract final class Content {
     '玄铁甲': 35,
     '天机诀': 55,
     '御剑诀': 65,
+    '护脉丹': 25,
+    '筑基丹': 60,
+    '凝丹灵液': 120,
+    '结婴丹': 240,
   };
   static const durations = {
     'cultivate': 30,
     'breakthrough': 7,
     'explore': 3,
-    'travel': 5,
+    'travel': 0,
+    'planRoute': 0,
+    'moveStep': 0,
+    'cancelRoute': 0,
+    'survey': 3,
+    'buyMap': 1,
+    'sectMap': 1,
+    'askDirections': 1,
+    'stabilize': 10,
+    'contemplate': 10,
+    'practice': 10,
+    'instruction': 10,
+    'advanceStage': 7,
+    'gather': 10,
+    'materialQuest': 10,
+    'enterSecret': 1,
+    'secretStep': 5,
+    'leaveSecret': 0,
     'rescue': 2,
     'befriend': 1,
     'apprentice': 7,

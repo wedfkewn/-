@@ -325,8 +325,12 @@ abstract final class AdventureRules {
     }
     var damage =
         18 + w.player.realm * 14 + (w.weapon != null ? 12 : 0) + affix(w, '锋锐');
+    damage = damage * (100 + w.player.stage * 5) ~/ 100;
     if (skill == '御剑诀') damage = damage * 18 ~/ 10;
-    if (enemyKind(w) == 1 && w.battleRound % 2 == 1 && skill != '天机诀') {
+    if (w.battleTarget != null &&
+        enemyKind(w) == 1 &&
+        w.battleRound % 2 == 1 &&
+        skill != '天机诀') {
       damage = (damage + 1) ~/ 2;
     }
     return damage;
@@ -340,7 +344,7 @@ abstract final class AdventureRules {
   }) {
     final n = w.entities[w.battleTarget]!;
     final special = w.battleRound % 2 == 1 && !disrupt;
-    var damage = 12 + n.realm * 12;
+    var damage = (12 + n.realm * 12) * (100 + n.stage * 5) ~/ 100;
     final kind = enemyKind(w);
     if (special && kind == 0) damage *= 2;
     if (special && kind == 2) damage = damage * 15 ~/ 10;
@@ -456,16 +460,23 @@ abstract final class AdventureRules {
         });
       }
 
-      if (n.coins >= 4) add('trade');
-      final place = w.entities.values
+      if ([
+            PlaceKind.town,
+            PlaceKind.market,
+          ].contains(w.mapPlaces[n.location]?.kind) &&
+          (n.supplies['灵草'] ?? 0) > 0) {
+        add('trade');
+      }
+      final road = w.mapRoads.values
           .where(
-            (e) =>
-                e.type == KarmaNodeType.location &&
-                e.id != n.location &&
-                w.knows(n.id, e.id),
+            (r) =>
+                (r.a == n.location || r.b == n.location) &&
+                w.knows(n.id, r.other(n.location)) &&
+                n.coins >= r.fee &&
+                r.travelDays(n.realm) <= w.day - n.lastActed,
           )
           .firstOrNull;
-      if (place != null) add('migration', target: place.id);
+      if (road != null) add('migration', target: road.other(n.location));
       final other = w.entities.values
           .where(
             (e) =>
@@ -519,7 +530,13 @@ abstract final class AdventureRules {
   }
 
   static void worldProposal(World w, Map<String, dynamic> proposal) {
-    if (w.frozen || w.encounter != null || w.battleTarget != null) return;
+    if (w.frozen ||
+        w.encounter != null ||
+        w.battleTarget != null ||
+        w.tribulation != null ||
+        w.secretRun != null) {
+      return;
+    }
     final option = worldCatalog(
       w,
     ).where((o) => o['id'] == proposal['action']).firstOrNull;
@@ -528,9 +545,22 @@ abstract final class AdventureRules {
     final f = FactWriter(w);
     final t = option['target'] as String?;
     final kind = option['kind'];
-    if (kind == 'migration') n.location = t!;
-    if (kind == 'trade') n.coins += 8;
+    if (kind == 'migration') {
+      final road = w.mapRoads.values.firstWhere(
+        (r) =>
+            (r.a == n.location && r.b == t) || (r.b == n.location && r.a == t),
+      );
+      n.coins -= road.fee;
+      n.location = t!;
+    }
+    if (kind == 'trade') {
+      n.supplies['灵草'] = n.supplies['灵草']! - 1;
+      n.coins += 4;
+    }
     if (kind == 'investigation') n.coins -= 5;
+    if (kind == 'migration') {
+      MapRules.revealNearby(w, n.id, InformationChannel.witness);
+    }
     final e = f.event(
       kind == 'trade'
           ? 'npcTrade'

@@ -1,6 +1,10 @@
 import 'dart:convert';
 import 'adventure_models.dart';
+import 'map_models.dart';
+import 'growth_models.dart';
 export 'adventure_models.dart';
+export 'map_models.dart';
+export 'growth_models.dart';
 
 enum KarmaNodeType {
   player,
@@ -87,6 +91,13 @@ class Entity {
   bool alive;
   String location, personality;
   String? sect, family;
+  int stage = 0,
+      foundation = 30,
+      insight = 0,
+      injuryDay = -1,
+      stabilizedDay = -1;
+  final Map<String, String> growthSources = {};
+  final Map<String, int> supplies = {};
   Map<String, Object?> toJson() => {
     'id': id,
     'type': type.name,
@@ -105,26 +116,43 @@ class Entity {
     'coins': coins,
     'hp': hp,
     'lastActed': lastActed,
+    'stage': stage,
+    'foundation': foundation,
+    'insight': insight,
+    'injuryDay': injuryDay,
+    'stabilizedDay': stabilizedDay,
+    'growthSources': growthSources,
+    'supplies': supplies,
   };
-  factory Entity.fromJson(Map<String, dynamic> j) => Entity(
-    id: j['id'],
-    type: KarmaNodeType.values.byName(j['type']),
-    name: j['name'],
-    importance: j['importance'],
-    created: j['created'],
-    updated: j['updated'],
-    alive: j['alive'],
-    realm: j['realm'],
-    ageDays: j['ageDays'],
-    location: j['location'],
-    sect: j['sect'],
-    family: j['family'],
-    personality: j['personality'],
-    spirit: j['spirit'],
-    coins: j['coins'],
-    hp: j['hp'],
-    lastActed: j['lastActed'] ?? 0,
-  );
+  factory Entity.fromJson(Map<String, dynamic> j) =>
+      Entity(
+          id: j['id'],
+          type: KarmaNodeType.values.byName(j['type']),
+          name: j['name'],
+          importance: j['importance'],
+          created: j['created'],
+          updated: j['updated'],
+          alive: j['alive'],
+          realm: j['realm'],
+          ageDays: j['ageDays'],
+          location: j['location'],
+          sect: j['sect'],
+          family: j['family'],
+          personality: j['personality'],
+          spirit: j['spirit'],
+          coins: j['coins'],
+          hp: j['hp'],
+          lastActed: j['lastActed'] ?? 0,
+        )
+        ..stage = j['stage'] ?? 0
+        ..foundation = j['foundation'] ?? 30
+        ..insight = j['insight'] ?? 0
+        ..injuryDay = j['injuryDay'] ?? -1
+        ..stabilizedDay = j['stabilizedDay'] ?? -1
+        ..growthSources.addAll(
+          Map<String, String>.from(j['growthSources'] ?? {}),
+        )
+        ..supplies.addAll(Map<String, int>.from(j['supplies'] ?? {}));
 }
 
 class Relation {
@@ -324,10 +352,16 @@ class World {
   final Map<String, int> inventory = {'灵草': 6, '回春丹': 2};
   final Set<String> techniques = {'长春诀'};
   final Map<String, int> quests = {};
+  int mapVersion = 0, regionCount = 12, placesPerRegion = 24;
+  final Map<String, MapPlace> mapPlaces = {};
+  final Map<String, MapRoad> mapRoads = {};
+  Journey? journey;
+  Tribulation? tribulation;
+  SecretRun? secretRun;
   final Set<String> processedDeaths = {};
   String? weapon, armor, battleTarget, battleOrigin;
   int battleHp = 0;
-  int rulesVersion = 2, battleQi = 10, battleRound = 0, aiWorldDay = 0;
+  int rulesVersion = 3, battleQi = 10, battleRound = 0, aiWorldDay = 0;
   String style = '长春诀';
   String? weaponId, armorId, battleReward;
   Encounter? encounter;
@@ -352,6 +386,7 @@ class World {
     bool confirmed = true,
     int depth = 0,
     String? source,
+    bool geography = false,
   }) {
     final previous = knowledge['$observer|$subject'];
     final entity = entities[subject];
@@ -368,8 +403,25 @@ class World {
           ? {
               'alive': entity.alive,
               'realm': entity.realm,
+              'stage': entity.stage,
               'updated': entity.updated,
               'location': entity.location,
+              if (mapPlaces.containsKey(subject)) ...{
+                'geographySource': geography
+                    ? source
+                    : previous?.snapshot['geographySource'] ??
+                          (previous == null ? source : null),
+                'geographyTime': geography
+                    ? day
+                    : previous?.snapshot['geographyTime'] ??
+                          previous?.time ??
+                          day,
+                'geographyChannel': geography
+                    ? channel.name
+                    : previous?.snapshot['geographyChannel'] ??
+                          previous?.channel.name ??
+                          channel.name,
+              },
             }
           : relation != null
           ? {
@@ -402,6 +454,14 @@ class World {
     'inventory': inventory,
     'techniques': techniques.toList(),
     'quests': quests,
+    'mapVersion': mapVersion,
+    'regionCount': regionCount,
+    'placesPerRegion': placesPerRegion,
+    'mapPlaces': mapPlaces.values.map((p) => p.toJson()).toList(),
+    'mapRoads': mapRoads.values.map((p) => p.toJson()).toList(),
+    'journey': journey?.toJson(),
+    'tribulation': tribulation?.toJson(),
+    'secretRun': secretRun?.toJson(),
     'processedDeaths': processedDeaths.toList(),
     'weapon': weapon,
     'armor': armor,
@@ -453,6 +513,30 @@ class World {
       ..clear()
       ..addAll(List<String>.from(j['techniques']));
     w.quests.addAll(Map<String, int>.from(j['quests']));
+    w.mapVersion = j['mapVersion'] ?? 0;
+    if (j['tribulation'] != null) {
+      w.tribulation = Tribulation.fromJson(
+        Map<String, dynamic>.from(j['tribulation']),
+      );
+    }
+    if (j['secretRun'] != null) {
+      w.secretRun = SecretRun.fromJson(
+        Map<String, dynamic>.from(j['secretRun']),
+      );
+    }
+    w.regionCount = j['regionCount'] ?? 12;
+    w.placesPerRegion = j['placesPerRegion'] ?? 24;
+    for (final value in j['mapPlaces'] ?? []) {
+      final p = MapPlace.fromJson(Map<String, dynamic>.from(value));
+      w.mapPlaces[p.id] = p;
+    }
+    for (final value in j['mapRoads'] ?? []) {
+      final p = MapRoad.fromJson(Map<String, dynamic>.from(value));
+      w.mapRoads[p.id] = p;
+    }
+    if (j['journey'] != null) {
+      w.journey = Journey.fromJson(Map<String, dynamic>.from(j['journey']));
+    }
     w.processedDeaths.addAll(List<String>.from(j['processedDeaths'] ?? []));
     w.weapon = j['weapon'];
     w.armor = j['armor'];

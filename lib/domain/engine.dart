@@ -1,6 +1,9 @@
 import 'content.dart';
 import 'models.dart';
+import 'map_repository.dart';
 part 'adventure_rules.dart';
+part 'map_rules.dart';
+part 'growth_rules.dart';
 
 class RuleViolation implements Exception {
   const RuleViolation(this.message);
@@ -253,10 +256,18 @@ class WorldGenerator {
     required String seed,
     required String worldId,
     String name = '李长生',
-    int npcCount = 120,
-    int version = 1,
+    int npcCount = 1200,
+    int version = 2,
+    int regionCount = 12,
+    int placesPerRegion = 24,
   }) {
-    if (version != 1 || npcCount < 1 || npcCount > 10000) {
+    if (![1, 2].contains(version) ||
+        npcCount < 1 ||
+        npcCount > 10000 ||
+        regionCount < 1 ||
+        regionCount > 24 ||
+        placesPerRegion < 10 ||
+        placesPerRegion > 48) {
       throw const RuleViolation('不支持的世界生成配置');
     }
     final rng = SeedRandom(SeedRandom.hash('$seed|$version|$npcCount'));
@@ -277,6 +288,9 @@ class WorldGenerator {
         importance: 2,
       );
     }
+    w.regionCount = regionCount;
+    w.placesPerRegion = placesPerRegion;
+    if (version == 2) MapRules.generate(w);
     for (var i = 0; i < Content.sects.length; i++) {
       final id = '$worldId:sect:$i';
       w.entities[id] = Entity(
@@ -284,7 +298,7 @@ class WorldGenerator {
         type: KarmaNodeType.sect,
         name: Content.sects[i],
         importance: 4,
-        location: '$worldId:location:${i + 1}',
+        location: '$worldId:location:${version == 2 ? [2, 9, 17][i] : i + 1}',
       );
     }
     for (var i = 0; i < Content.families.length; i++) {
@@ -325,7 +339,7 @@ class WorldGenerator {
         name:
             '${Content.families[familyIndex][0]}${firstNames[rng.next(firstNames.length)]}${i < 10 ? '' : '·$i'}',
         location:
-            '$worldId:location:${i < 4 ? 0 : rng.next(Content.places.length)}',
+            '$worldId:location:${i < 4 ? 0 : rng.next(version == 2 ? w.mapPlaces.length : Content.places.length)}',
         family: '$worldId:family:$familyIndex',
         realm: i < 4 ? 0 : rng.next(4),
         hp: i < 2 ? 35 : 100,
@@ -390,7 +404,8 @@ class WorldGenerator {
     );
     for (final e in w.entities.values.where(
       (e) =>
-          e.type == KarmaNodeType.location ||
+          (e.type == KarmaNodeType.location &&
+              (version == 1 || Content.places.contains(e.name))) ||
           e.type == KarmaNodeType.sect ||
           e.id == w.playerId ||
           (e.type == KarmaNodeType.npc && e.location == w.player.location),
@@ -398,6 +413,18 @@ class WorldGenerator {
       w.discover(w.playerId, e.id, InformationChannel.witness);
     }
     f.event('birth', '踏入仙途', '${w.player.name}在青溪镇踏上修行之路。', [w.playerId]);
+    if (version == 2) {
+      for (final n
+          in w.entities.values
+              .where(
+                (e) =>
+                    e.type == KarmaNodeType.npc ||
+                    e.type == KarmaNodeType.player,
+              )
+              .toList()) {
+        MapRules.revealNearby(w, n.id, InformationChannel.witness);
+      }
+    }
     return w;
   }
 }
@@ -437,6 +464,10 @@ class GameCommandService {
     if (original.encounter != null && command.kind != 'chooseEncounter') {
       throw const RuleViolation('请先处理待定奇遇');
     }
+    if (original.secretRun != null &&
+        !['secretStep', 'leaveSecret', 'useItem'].contains(command.kind)) {
+      throw const RuleViolation('请先继续或离开秘境');
+    }
     if (command.proposal != null) {
       AiProposalValidator.validate(
         original,
@@ -445,7 +476,7 @@ class GameCommandService {
         target: command.target,
       );
     }
-    if (original.battleTarget != null &&
+    if ((original.battleTarget != null || original.tribulation != null) &&
         ![
           'attack',
           'skill',
@@ -456,6 +487,7 @@ class GameCommandService {
       throw const RuleViolation('战斗中只能攻击、施法、用药或逃跑');
     }
     final w = original.copy();
+    if (w.mapVersion == 0) MapRules.generate(w);
     w.rulesVersion = Content.version;
     final f = FactWriter(w);
     final p = w.player;
@@ -502,561 +534,630 @@ class GameCommandService {
       importance: importance,
       causes: causes,
     );
-    final cost = command.kind == 'chooseEncounter' && command.item == 'leave'
+    final cost = command.kind == 'moveStep'
+        ? MapRules.nextRoad(w).travelDays(p.realm)
+        : command.kind == 'chooseEncounter' && command.item == 'leave'
         ? 0
         : Content.durations[command.kind]!;
     w.day += cost;
     p.ageDays += cost;
-    switch (command.kind) {
-      case 'cultivate':
-        final gain =
-            25 +
-            w.techniques.fold<int>(0, (sum, t) => sum + Content.techniques[t]!);
-        p.spirit += gain;
-        p.hp = (p.hp + 15).clamp(0, maxHp(p));
-        action('闭关修炼', '运转功法，修为增加 $gain。');
-      case 'breakthrough':
-        if (p.realm >= Content.realms.length - 1) {
-          throw const RuleViolation('已至渡劫巅峰');
-        }
-        final threshold = (p.realm + 1) * 80;
-        if (p.spirit < threshold) {
-          throw RuleViolation('突破需要 $threshold 修为');
-        }
-        p.spirit -= threshold;
-        final protection = w.techniques.contains('长春诀') ? 10 : 0;
-        if (w.random.next(100) < 75 + protection) {
-          p.realm++;
-          p.hp = maxHp(p);
+    if (p.ageDays >= Content.lifespans[p.realm] * 360) {
+      final expiry = action(
+        '寿元耗尽',
+        '行动耗时超出此境寿元，这一世终结。',
+        kind: 'oldAge',
+        importance: 3,
+      );
+      f.die(p, expiry);
+    } else if (w.tribulation != null) {
+      GrowthRules.tribulationTurn(w, f, command);
+    } else {
+      switch (command.kind) {
+        case 'cultivate':
+          GrowthRules.cultivate(w, f);
+        case 'stabilize':
+          GrowthRules.stabilize(w, f);
+        case 'practice':
+          GrowthRules.stabilize(w, f, practice: true);
+        case 'contemplate':
+          GrowthRules.contemplate(w, f);
+        case 'instruction':
+          GrowthRules.instruction(w, f, target());
+        case 'advanceStage':
+        case 'breakthrough':
+          if (command.kind == 'advanceStage' && p.stage == 3) {
+            throw const RuleViolation('圆满之后请准备大境界突破');
+          }
+          GrowthRules.promote(w, f, command);
+        case 'gather':
+          GrowthRules.gather(w, f, command.item);
+        case 'materialQuest':
+          GrowthRules.materialQuest(w, f);
+        case 'enterSecret':
+        case 'secretStep':
+        case 'leaveSecret':
+          GrowthRules.secret(w, f, command.kind);
+        case 'travel':
+        case 'planRoute':
+          MapRules.plan(w, f, command.target);
+        case 'moveStep':
+          MapRules.move(w, f);
+        case 'cancelRoute':
+          w.journey = null;
+        case 'survey':
+          final e = action('踏勘山河', '调查当前地点及相邻道路。');
+          MapRules.revealNearby(
+            w,
+            p.id,
+            InformationChannel.investigation,
+            source: e.id,
+          );
+        case 'buyMap':
+          MapRules.buyMap(w, f);
+        case 'sectMap':
+          MapRules.sectMap(w, f);
+        case 'askDirections':
+          final n = target();
+          MapRules.ask(w, f, n);
+        case 'explore':
+          w.encounter = AdventureRules.discover(w, f, command.proposal);
+        case 'chooseEncounter':
+          AdventureRules.choose(w, f, command.item);
+        case 'talk':
+          AdventureRules.talk(w, f, command);
+        case 'setStyle':
+          if (command.item == null || !w.techniques.contains(command.item)) {
+            throw const RuleViolation('尚未掌握该功法');
+          }
+          w.style = command.item!;
+          action('调整流派', '当前流派：${w.style}。');
+        case 'defend':
+          if (w.battleTarget == null) throw const RuleViolation('当前没有战斗');
+          w.battleQi = (w.battleQi + 2).clamp(
+            0,
+            10 + p.realm * 2 + AdventureRules.affix(w, '养气'),
+          );
           action(
-            '突破${Content.realms[p.realm]}',
-            '经历天劫洗礼，寿元与神识提升。',
+            '守御调息',
+            '本合减伤一半，恢复2点战斗灵力。',
+            causes: [Cause(w.battleOrigin!, CausalKind.direct)],
+          );
+          AdventureRules.counter(w, f, defend: true);
+        case 'rescue':
+          final n = target();
+          if (n.hp >= maxHp(n)) {
+            throw const RuleViolation('此人无需救助');
+          }
+          consume('回春丹', 1);
+          n.hp = maxHp(n);
+          final e = action(
+            '救下${n.name}',
+            '${p.name}以回春丹救助${n.name}。',
+            participants: [p.id, n.id],
             importance: 3,
           );
-        } else {
-          p.hp -= 35 + p.realm * 10;
-          final e = action('突破受挫', '经脉受损，突破失败。');
-          if (p.hp <= 0) {
-            f.die(p, e);
-          }
-        }
-      case 'travel':
-        final place = w.entities[command.target];
-        if (place?.type != KarmaNodeType.location ||
-            !w.knows(p.id, place!.id)) {
-          throw const RuleViolation('未知地点');
-        }
-        p.location = place.id;
-        action('行至${place.name}', '沿山路抵达${place.name}。');
-        for (final n in w.entities.values.where(
-          (n) =>
-              n.type == KarmaNodeType.npc &&
-              n.alive &&
-              n.location == p.location,
-        )) {
-          w.discover(p.id, n.id, InformationChannel.witness);
-        }
-      case 'explore':
-        w.encounter = AdventureRules.discover(w, f, command.proposal);
-      case 'chooseEncounter':
-        AdventureRules.choose(w, f, command.item);
-      case 'talk':
-        AdventureRules.talk(w, f, command);
-      case 'setStyle':
-        if (command.item == null || !w.techniques.contains(command.item)) {
-          throw const RuleViolation('尚未掌握该功法');
-        }
-        w.style = command.item!;
-        action('调整流派', '当前流派：${w.style}。');
-      case 'defend':
-        if (w.battleTarget == null) throw const RuleViolation('当前没有战斗');
-        w.battleQi = (w.battleQi + 2).clamp(
-          0,
-          10 + p.realm * 2 + AdventureRules.affix(w, '养气'),
-        );
-        action(
-          '守御调息',
-          '本合减伤一半，恢复2点战斗灵力。',
-          causes: [Cause(w.battleOrigin!, CausalKind.direct)],
-        );
-        AdventureRules.counter(w, f, defend: true);
-      case 'rescue':
-        final n = target();
-        if (n.hp >= maxHp(n)) {
-          throw const RuleViolation('此人无需救助');
-        }
-        consume('回春丹', 1);
-        n.hp = maxHp(n);
-        final e = action(
-          '救下${n.name}',
-          '${p.name}以回春丹救助${n.name}。',
-          participants: [p.id, n.id],
-          importance: 3,
-        );
-        f.relation(n.id, p.id, KarmaRelationType.gratitude, e, strength: 70);
-        for (final promise in f.adjacency[p.id] ?? <Relation>[]) {
-          if (promise.source == p.id &&
-              promise.target == n.id &&
-              promise.type == KarmaRelationType.promise &&
-              promise.status == RelationStatus.active) {
-            promise
-              ..status = RelationStatus.settled
-              ..updated = w.day
-              ..events.add(e.id);
-          }
-        }
-      case 'befriend':
-        final n = target();
-        final e = action(
-          '结交${n.name}',
-          '论道相契，结为朋友。',
-          participants: [p.id, n.id],
-        );
-        f.relation(
-          p.id,
-          n.id,
-          KarmaRelationType.friendship,
-          e,
-          bidirectional: true,
-        );
-      case 'apprentice':
-        final n = target();
-        if (n.realm <= p.realm) {
-          throw const RuleViolation('师父境界须高于自己');
-        }
-        spend(20);
-        final e = action(
-          '拜${n.name}为师',
-          '奉上拜师礼，受传道之恩。',
-          participants: [p.id, n.id],
-          importance: 3,
-        );
-        f.relation(
-          n.id,
-          p.id,
-          KarmaRelationType.masterDisciple,
-          e,
-          strength: 50,
-        );
-      case 'joinSect':
-        final sect = w.entities[command.target];
-        if (sect?.type != KarmaNodeType.sect ||
-            !sect!.alive ||
-            !w.knows(p.id, sect.id)) {
-          throw const RuleViolation('无法加入该宗门');
-        }
-        if (p.sect == sect.id) {
-          throw const RuleViolation('已是本宗弟子');
-        }
-        spend(20);
-        if (p.sect != null) {
-          for (final r in f.adjacency[p.id] ?? <Relation>[]) {
-            if (r.type == KarmaRelationType.sectAffiliation &&
-                r.status == RelationStatus.active) {
-              r.status = RelationStatus.historical;
-              r.updated = w.day;
+          f.relation(n.id, p.id, KarmaRelationType.gratitude, e, strength: 70);
+          for (final promise in f.adjacency[p.id] ?? <Relation>[]) {
+            if (promise.source == p.id &&
+                promise.target == n.id &&
+                promise.type == KarmaRelationType.promise &&
+                promise.status == RelationStatus.active) {
+              promise
+                ..status = RelationStatus.settled
+                ..updated = w.day
+                ..events.add(e.id);
             }
           }
-        }
-        p.sect = sect.id;
-        final e = action(
-          '加入${sect.name}',
-          '正式拜入宗门，获得情报与委托。',
-          participants: [p.id, sect.id],
-          importance: 3,
-        );
-        f.relation(
-          p.id,
-          sect.id,
-          KarmaRelationType.sectAffiliation,
-          e,
-          strength: 40,
-        );
-        w.quests.putIfAbsent('宗门委托', () => 0);
-      case 'trade':
-        final item = command.item;
-        final price = Content.prices[item];
-        if (price == null || command.amount == 0 || command.amount.abs() > 99) {
-          throw const RuleViolation('交易数量或物品无效');
-        }
-        if (command.amount > 0) {
-          spend(price * command.amount);
-          if (['青锋剑', '玄铁甲'].contains(item)) {
-            for (var i = 0; i < command.amount; i++) {
-              AdventureRules.addEquipment(w, item!);
-            }
-          } else {
-            w.inventory[item!] = (w.inventory[item] ?? 0) + command.amount;
-          }
-        } else {
-          if (['青锋剑', '玄铁甲'].contains(item)) {
-            final available = w.equipment.values
-                .where(
-                  (e) =>
-                      e.name == item && e.id != w.weaponId && e.id != w.armorId,
-                )
-                .toList();
-            if (available.length < -command.amount) {
-              throw const RuleViolation('未装备的物品不足');
-            }
-            for (final e in available.take(-command.amount)) {
-              w.equipment.remove(e.id);
-            }
-          } else {
-            consume(item!, -command.amount);
-          }
-          p.coins += price * -command.amount ~/ 2;
-        }
-        final merchant = command.target == null ? null : target();
-        final e = action(
-          '坊市交易',
-          '${command.amount > 0 ? '购入' : '售出'}$item × ${command.amount.abs()}。',
-          participants: [p.id, if (merchant != null) merchant.id],
-        );
-        if (merchant != null) {
+        case 'befriend':
+          final n = target();
+          final e = action(
+            '结交${n.name}',
+            '论道相契，结为朋友。',
+            participants: [p.id, n.id],
+          );
           f.relation(
             p.id,
-            merchant.id,
+            n.id,
             KarmaRelationType.friendship,
             e,
-            strength: 2,
             bidirectional: true,
           );
-        }
-      case 'craft':
-        final item = command.item;
-        final herbs = Content.recipes[item];
-        if (herbs == null) {
-          throw const RuleViolation('未知丹方');
-        }
-        consume('灵草', herbs);
-        spend(3);
-        w.inventory[item!] = (w.inventory[item] ?? 0) + 1;
-        action('炼成$item', '消耗 $herbs 株灵草，丹成一枚。');
-      case 'learn':
-        final item = command.item;
-        if (!Content.techniques.containsKey(item) ||
-            w.techniques.contains(item)) {
-          throw const RuleViolation('功法无效或已经掌握');
-        }
-        consume(item!, 1);
-        w.techniques.add(item);
-        action('参悟$item', '功法融会贯通，修炼与神识增强。');
-      case 'equip':
-        final equipment =
-            w.equipment[command.item] ??
-            w.equipment.values.where((e) => e.name == command.item).firstOrNull;
-        if (equipment == null) throw const RuleViolation('未持有此装备');
-        if (equipment.slot == 'weapon') {
-          w.weaponId = equipment.id;
-          w.weapon = equipment.name;
-        } else {
-          w.armorId = equipment.id;
-          w.armor = equipment.name;
-        }
-        action('装备${equipment.name}', equipment.description);
-      case 'useItem':
-        final item = command.item;
-        if (!['回春丹', '聚灵丹'].contains(item)) {
-          throw const RuleViolation('不能使用此物品');
-        }
-        consume(item!, 1);
-        if (item == '回春丹') {
-          p.hp = (p.hp + 65).clamp(0, maxHp(p));
-        } else {
-          p.spirit += 40;
-        }
-        action('服用$item', '丹药灵力化入经脉。');
-        if (w.battleTarget != null) {
-          _counterattack(w, f);
-        }
-      case 'quest':
-        final key = command.item;
-        final stage = w.quests[key];
-        if (stage == null || stage >= 3) {
-          throw const RuleViolation('没有可推进的奇遇');
-        }
-        if (key == '宗门委托') {
-          if (p.sect == null) {
-            throw const RuleViolation('需先加入宗门');
+        case 'apprentice':
+          final n = target();
+          if (n.realm <= p.realm) {
+            throw const RuleViolation('师父境界须高于自己');
           }
-          if (stage == 0) {
-            consume('灵草', 2);
-          } else if (stage == 1) {
-            consume('回春丹', 1);
-          }
-          if (stage == 2) {
-            p.coins += 70;
-            p.spirit += 30;
-          }
-        } else if (key == '古碑') {
-          if (stage == 1 && command.target == 'leave') {
-            w.quests[key!] = 3;
-            action('放下古碑之缘', '选择离去，奇遇就此了结。');
-            break;
-          }
-          if (stage == 1) {
-            spend(10);
-          }
-          if (stage == 2) {
-            w.inventory['天机诀'] = (w.inventory['天机诀'] ?? 0) + 1;
-          }
-        }
-        final previous = f.last(p.id, 'quest');
-        w.quests[key!] = stage + 1;
-        action(
-          '$key · 第${stage + 1}阶段',
-          stage == 2 ? '完成奇遇，取得报酬。' : '线索得到验证，下一阶段开启。',
-          causes: previous?.title.startsWith(key) == true
-              ? [Cause(previous!.id, CausalKind.direct)]
-              : [],
-          importance: stage == 2 ? 3 : 1,
-        );
-      case 'promise':
-        final n = target();
-        final e = action(
-          '向${n.name}立下承诺',
-          '答应在危难时援手。',
-          participants: [p.id, n.id],
-        );
-        f.relation(p.id, n.id, KarmaRelationType.promise, e, strength: 35);
-      case 'borrow':
-        final n = target();
-        if (n.coins < 20 ||
-            (f.adjacency[p.id] ?? []).any(
-              (r) =>
-                  r.type == KarmaRelationType.debt &&
-                  r.target == n.id &&
-                  r.status == RelationStatus.active,
-            )) {
-          throw const RuleViolation('无法借款或尚有债务');
-        }
-        n.coins -= 20;
-        p.coins += 20;
-        final e = action(
-          '向${n.name}借款',
-          '借得二十灵石，负有偿还义务。',
-          participants: [p.id, n.id],
-        );
-        f.relation(p.id, n.id, KarmaRelationType.debt, e, strength: 20);
-      case 'repay':
-        final n = target();
-        final debts = (f.adjacency[p.id] ?? [])
-            .where(
-              (r) =>
-                  r.type == KarmaRelationType.debt &&
-                  r.source == p.id &&
-                  r.target == n.id &&
-                  r.status == RelationStatus.active,
-            )
-            .toList();
-        if (debts.isEmpty) {
-          throw const RuleViolation('没有需要偿还的债务');
-        }
-        spend(20);
-        n.coins += 20;
-        final e = action(
-          '偿还${n.name}的债务',
-          '债务已清，旧事仍可追溯。',
-          participants: [p.id, n.id],
-          causes: [
-            Cause(
-              debts.first.events.reversed.firstWhere(
-                (id) => ['borrow', 'news'].contains(w.events[id]!.kind),
-              ),
-              CausalKind.direct,
-            ),
-          ],
-        );
-        debts.first
-          ..status = RelationStatus.settled
-          ..updated = w.day
-          ..events.add(e.id);
-      case 'companion':
-        final n = target();
-        final friends = (f.adjacency[p.id] ?? []).where(
-          (r) =>
-              r.type == KarmaRelationType.friendship &&
-              (r.source == n.id || r.target == n.id) &&
-              r.strength >= 60,
-        );
-        if (friends.isEmpty) {
-          throw const RuleViolation('需先建立深厚友谊（强度60）');
-        }
-        final e = action(
-          '与${n.name}结为道侣',
-          '携手修行，共历仙途。',
-          participants: [p.id, n.id],
-          importance: 3,
-        );
-        f.relation(
-          p.id,
-          n.id,
-          KarmaRelationType.daoCompanion,
-          e,
-          strength: 60,
-          bidirectional: true,
-        );
-      case 'investigate':
-        final n = target(nearby: false);
-        spend(5);
-        final subjects = (f.adjacency[n.id] ?? [])
-            .where((r) => w.knows(n.id, r.id) && !w.knows(p.id, r.id))
-            .take(4)
-            .toList();
-        for (final r in subjects) {
-          w.discover(p.id, r.source, InformationChannel.investigation);
-          w.discover(p.id, r.target, InformationChannel.investigation);
-          w.discover(p.id, r.id, InformationChannel.investigation);
-          for (final id in r.events) {
-            final e = w.events[id];
-            if (e != null && w.knows(n.id, id)) {
-              f.reveal(e, p.id, InformationChannel.told, source: n.id);
-            }
-          }
-        }
-        action(
-          '调查${n.name}',
-          '通过走访与本人告知，获得 ${subjects.length} 条已确认关系。',
-          participants: [p.id, n.id],
-        );
-      case 'divine':
-        if (p.realm < 2) {
-          throw const RuleViolation('金丹境方可感知天机');
-        }
-        spend(12);
-        final awareness = Content.awareness(
-          p.realm,
-          p.spirit,
-          w.techniques.contains('天机诀'),
-        );
-        final depth =
-            (p.realm -
-                    1 +
-                    (w.techniques.contains('天机诀') ? 1 : 0) +
-                    awareness ~/ 100)
-                .clamp(1, 5);
-        final known = w.knowledge.values
-            .where(
-              (k) =>
-                  k.observer == p.id &&
-                  k.confirmed &&
-                  w.entities.containsKey(k.subject),
-            )
-            .map((k) => k.subject)
-            .toSet();
-        final candidates = <Relation>[];
-        for (final id in known) {
-          for (final r in f.adjacency[id] ?? <Relation>[]) {
-            if (!w.knows(p.id, r.id) && !candidates.contains(r)) {
-              candidates.add(r);
-            }
-          }
-        }
-        if (candidates.isNotEmpty &&
-            w.random.next(100) <
-                (45 + depth * 8 + awareness ~/ 20).clamp(0, 95)) {
-          final r = candidates[w.random.next(candidates.length)];
-          w.discover(
-            p.id,
-            r.source,
-            InformationChannel.divination,
-            depth: depth,
-          );
-          w.discover(
-            p.id,
-            r.target,
-            InformationChannel.divination,
-            depth: depth,
-          );
-          w.discover(p.id, r.id, InformationChannel.divination, depth: depth);
-          for (final id in r.events.take(depth)) {
-            f.reveal(w.events[id]!, p.id, InformationChannel.divination);
-          }
-          action('天机显现', '推演确认了一条深层关系。');
-        } else {
-          action('天机未明', '推演未得确证，未显露未知对象。');
-        }
-      case 'startBattle':
-        final n = target();
-        w.battleTarget = n.id;
-        AdventureRules.start(w);
-        final e = f.event(
-          command.secret ? 'secretKill' : 'challenge',
-          '与${n.name}交战',
-          '${p.name}向${n.name}发起战斗。',
-          [p.id, n.id],
-          witnessed: !command.secret,
-        );
-        w.battleOrigin = e.id;
-        w.battleReward = null;
-        AdventureRules.start(w);
-      case 'attack':
-      case 'skill':
-        if (w.battleTarget == null) {
-          throw const RuleViolation('当前没有战斗');
-        }
-        final n = w.entities[w.battleTarget]!;
-        final chosenSkill = command.kind == 'skill'
-            ? (command.item ?? w.style)
-            : null;
-        final damage = AdventureRules.attack(w, chosenSkill);
-        n.hp -= damage;
-        w.battleHp = n.hp;
-        final origin = w.events[w.battleOrigin]!;
-        if (n.hp <= 0) {
-          final e = f.event(
-            origin.kind == 'secretKill' ? 'secretKill' : 'victory',
-            '击败${n.name}',
-            '${n.name}在战斗中身亡。',
-            [p.id, n.id],
-            causes: [Cause(origin.id, CausalKind.direct)],
+          spend(20);
+          final e = action(
+            '拜${n.name}为师',
+            '奉上拜师礼，受传道之恩。',
+            participants: [p.id, n.id],
             importance: 3,
-            witnessed: origin.kind != 'secretKill',
           );
-          f.die(n, e);
-          p.coins += n.coins;
-          n.coins = 0;
-          if (w.battleReward == 'equipment') AdventureRules.award(w, f, e.id);
-          if (w.battleReward == 'coins') p.coins += 15 + p.realm * 5;
-          w.battleReward = null;
-          w.battleTarget = null;
-          w.battleOrigin = null;
-        } else {
-          f.event(
-            'battleRound',
-            '交战一合',
-            '对${n.name}造成 $damage 伤害。',
+          f.relation(
+            n.id,
+            p.id,
+            KarmaRelationType.masterDisciple,
+            e,
+            strength: 50,
+          );
+        case 'joinSect':
+          final sect = w.entities[command.target];
+          if (sect?.type != KarmaNodeType.sect ||
+              !sect!.alive ||
+              !w.knows(p.id, sect.id)) {
+            throw const RuleViolation('无法加入该宗门');
+          }
+          if (p.sect == sect.id) {
+            throw const RuleViolation('已是本宗弟子');
+          }
+          spend(20);
+          if (p.sect != null) {
+            for (final r in f.adjacency[p.id] ?? <Relation>[]) {
+              if (r.type == KarmaRelationType.sectAffiliation &&
+                  r.status == RelationStatus.active) {
+                r.status = RelationStatus.historical;
+                r.updated = w.day;
+              }
+            }
+          }
+          p.sect = sect.id;
+          final e = action(
+            '加入${sect.name}',
+            '正式拜入宗门，获得情报与委托。',
+            participants: [p.id, sect.id],
+            importance: 3,
+          );
+          f.relation(
+            p.id,
+            sect.id,
+            KarmaRelationType.sectAffiliation,
+            e,
+            strength: 40,
+          );
+          w.quests.putIfAbsent('宗门委托', () => 0);
+        case 'trade':
+          final item = command.item;
+          final point = w.mapPlaces[p.location]!;
+          if (![PlaceKind.town, PlaceKind.market].contains(point.kind)) {
+            throw const RuleViolation('请前往城镇或坊市交易');
+          }
+          if (MapRules.materials.contains(item) &&
+              !point.resources.contains(item)) {
+            throw const RuleViolation('此地不出售该突破材料');
+          }
+          final price = Content.prices[item];
+          if (price == null ||
+              command.amount == 0 ||
+              command.amount.abs() > 99) {
+            throw const RuleViolation('交易数量或物品无效');
+          }
+          if (command.amount > 0) {
+            spend(price * command.amount);
+            if (['青锋剑', '玄铁甲'].contains(item)) {
+              for (var i = 0; i < command.amount; i++) {
+                AdventureRules.addEquipment(w, item!);
+              }
+            } else {
+              w.inventory[item!] = (w.inventory[item] ?? 0) + command.amount;
+            }
+          } else {
+            if (['青锋剑', '玄铁甲'].contains(item)) {
+              final available = w.equipment.values
+                  .where(
+                    (e) =>
+                        e.name == item &&
+                        e.id != w.weaponId &&
+                        e.id != w.armorId,
+                  )
+                  .toList();
+              if (available.length < -command.amount) {
+                throw const RuleViolation('未装备的物品不足');
+              }
+              for (final e in available.take(-command.amount)) {
+                w.equipment.remove(e.id);
+              }
+            } else {
+              consume(item!, -command.amount);
+            }
+            p.coins += price * -command.amount ~/ 2;
+          }
+          final merchant = command.target == null ? null : target();
+          final discoveredMarket =
+              w.knowledge['${p.id}|${p.location}']?.snapshot['geographySource']
+                  as String?;
+          final e = action(
+            '坊市交易',
+            '${command.amount > 0 ? '购入' : '售出'}$item × ${command.amount.abs()}。',
+            causes: [
+              if (MapRules.materials.contains(item) &&
+                  discoveredMarket != null &&
+                  w.events.containsKey(discoveredMarket))
+                Cause(discoveredMarket, CausalKind.direct),
+            ],
+            participants: [p.id, if (merchant != null) merchant.id],
+          );
+          if (merchant != null) {
+            f.relation(
+              p.id,
+              merchant.id,
+              KarmaRelationType.friendship,
+              e,
+              strength: 2,
+              bidirectional: true,
+            );
+          }
+        case 'craft':
+          final item = command.item;
+          final herbs = Content.recipes[item];
+          if (herbs == null) {
+            throw const RuleViolation('未知丹方');
+          }
+          consume('灵草', herbs);
+          spend(3);
+          w.inventory[item!] = (w.inventory[item] ?? 0) + 1;
+          action('炼成$item', '消耗 $herbs 株灵草，丹成一枚。');
+        case 'learn':
+          final item = command.item;
+          if (!Content.techniques.containsKey(item) ||
+              w.techniques.contains(item)) {
+            throw const RuleViolation('功法无效或已经掌握');
+          }
+          consume(item!, 1);
+          w.techniques.add(item);
+          action('参悟$item', '功法融会贯通，修炼与神识增强。');
+        case 'equip':
+          final equipment =
+              w.equipment[command.item] ??
+              w.equipment.values
+                  .where((e) => e.name == command.item)
+                  .firstOrNull;
+          if (equipment == null) throw const RuleViolation('未持有此装备');
+          if (equipment.slot == 'weapon') {
+            w.weaponId = equipment.id;
+            w.weapon = equipment.name;
+          } else {
+            w.armorId = equipment.id;
+            w.armor = equipment.name;
+          }
+          action('装备${equipment.name}', equipment.description);
+        case 'useItem':
+          final item = command.item;
+          if (!['回春丹', '聚灵丹'].contains(item)) {
+            throw const RuleViolation('不能使用此物品');
+          }
+          consume(item!, 1);
+          if (item == '回春丹') {
+            p.hp = (p.hp + 65).clamp(0, maxHp(p));
+          } else {
+            p.spirit += 40;
+          }
+          action('服用$item', '丹药灵力化入经脉。');
+          if (w.battleTarget != null) {
+            _counterattack(w, f);
+          }
+        case 'quest':
+          final key = command.item;
+          final stage = w.quests[key];
+          if (stage == null || stage >= 3) {
+            throw const RuleViolation('没有可推进的奇遇');
+          }
+          if (key == '宗门委托') {
+            if (p.sect == null) {
+              throw const RuleViolation('需先加入宗门');
+            }
+            if (stage == 0) {
+              consume('灵草', 2);
+            } else if (stage == 1) {
+              consume('回春丹', 1);
+            }
+            if (stage == 2) {
+              p.coins += 70;
+              p.spirit += 30;
+            }
+          } else if (key == '古碑') {
+            if (stage == 1 && command.target == 'leave') {
+              w.quests[key!] = 3;
+              action('放下古碑之缘', '选择离去，奇遇就此了结。');
+              break;
+            }
+            if (stage == 1) {
+              spend(10);
+            }
+            if (stage == 2) {
+              w.inventory['天机诀'] = (w.inventory['天机诀'] ?? 0) + 1;
+            }
+          }
+          final previous = f.last(p.id, 'quest');
+          w.quests[key!] = stage + 1;
+          action(
+            '$key · 第${stage + 1}阶段',
+            stage == 2 ? '完成奇遇，取得报酬。' : '线索得到验证，下一阶段开启。',
+            causes: previous?.title.startsWith(key) == true
+                ? [Cause(previous!.id, CausalKind.direct)]
+                : [],
+            importance: stage == 2 ? 3 : 1,
+          );
+        case 'promise':
+          final n = target();
+          final e = action(
+            '向${n.name}立下承诺',
+            '答应在危难时援手。',
+            participants: [p.id, n.id],
+          );
+          f.relation(p.id, n.id, KarmaRelationType.promise, e, strength: 35);
+        case 'borrow':
+          final n = target();
+          if (n.coins < 20 ||
+              (f.adjacency[p.id] ?? []).any(
+                (r) =>
+                    r.type == KarmaRelationType.debt &&
+                    r.target == n.id &&
+                    r.status == RelationStatus.active,
+              )) {
+            throw const RuleViolation('无法借款或尚有债务');
+          }
+          n.coins -= 20;
+          p.coins += 20;
+          final e = action(
+            '向${n.name}借款',
+            '借得二十灵石，负有偿还义务。',
+            participants: [p.id, n.id],
+          );
+          f.relation(p.id, n.id, KarmaRelationType.debt, e, strength: 20);
+        case 'repay':
+          final n = target();
+          final debts = (f.adjacency[p.id] ?? [])
+              .where(
+                (r) =>
+                    r.type == KarmaRelationType.debt &&
+                    r.source == p.id &&
+                    r.target == n.id &&
+                    r.status == RelationStatus.active,
+              )
+              .toList();
+          if (debts.isEmpty) {
+            throw const RuleViolation('没有需要偿还的债务');
+          }
+          spend(20);
+          n.coins += 20;
+          final e = action(
+            '偿还${n.name}的债务',
+            '债务已清，旧事仍可追溯。',
+            participants: [p.id, n.id],
+            causes: [
+              Cause(
+                debts.first.events.reversed.firstWhere(
+                  (id) => ['borrow', 'news'].contains(w.events[id]!.kind),
+                ),
+                CausalKind.direct,
+              ),
+            ],
+          );
+          debts.first
+            ..status = RelationStatus.settled
+            ..updated = w.day
+            ..events.add(e.id);
+        case 'companion':
+          final n = target();
+          final friends = (f.adjacency[p.id] ?? []).where(
+            (r) =>
+                r.type == KarmaRelationType.friendship &&
+                (r.source == n.id || r.target == n.id) &&
+                r.strength >= 60,
+          );
+          if (friends.isEmpty) {
+            throw const RuleViolation('需先建立深厚友谊（强度60）');
+          }
+          final e = action(
+            '与${n.name}结为道侣',
+            '携手修行，共历仙途。',
+            participants: [p.id, n.id],
+            importance: 3,
+          );
+          f.relation(
+            p.id,
+            n.id,
+            KarmaRelationType.daoCompanion,
+            e,
+            strength: 60,
+            bidirectional: true,
+          );
+        case 'investigate':
+          final n = target(nearby: false);
+          spend(5);
+          final subjects = (f.adjacency[n.id] ?? [])
+              .where((r) => w.knows(n.id, r.id) && !w.knows(p.id, r.id))
+              .take(4)
+              .toList();
+          for (final r in subjects) {
+            w.discover(p.id, r.source, InformationChannel.investigation);
+            w.discover(p.id, r.target, InformationChannel.investigation);
+            w.discover(p.id, r.id, InformationChannel.investigation);
+            for (final id in r.events) {
+              final e = w.events[id];
+              if (e != null && w.knows(n.id, id)) {
+                f.reveal(e, p.id, InformationChannel.told, source: n.id);
+              }
+            }
+          }
+          action(
+            '调查${n.name}',
+            '通过走访与本人告知，获得 ${subjects.length} 条已确认关系。',
+            participants: [p.id, n.id],
+          );
+        case 'divine':
+          if (p.realm < 2) {
+            throw const RuleViolation('金丹境方可感知天机');
+          }
+          spend(12);
+          final awareness = Content.awareness(
+            p.realm,
+            p.spirit,
+            w.techniques.contains('天机诀'),
+          );
+          final depth =
+              (p.realm -
+                      1 +
+                      (w.techniques.contains('天机诀') ? 1 : 0) +
+                      awareness ~/ 100)
+                  .clamp(1, 5);
+          final known = w.knowledge.values
+              .where(
+                (k) =>
+                    k.observer == p.id &&
+                    k.confirmed &&
+                    w.entities.containsKey(k.subject),
+              )
+              .map((k) => k.subject)
+              .toSet();
+          final candidates = <Relation>[];
+          for (final id in known) {
+            for (final r in f.adjacency[id] ?? <Relation>[]) {
+              if (!w.knows(p.id, r.id) && !candidates.contains(r)) {
+                candidates.add(r);
+              }
+            }
+          }
+          if (candidates.isNotEmpty &&
+              w.random.next(100) <
+                  (45 + depth * 8 + awareness ~/ 20).clamp(0, 95)) {
+            final r = candidates[w.random.next(candidates.length)];
+            w.discover(
+              p.id,
+              r.source,
+              InformationChannel.divination,
+              depth: depth,
+            );
+            w.discover(
+              p.id,
+              r.target,
+              InformationChannel.divination,
+              depth: depth,
+            );
+            w.discover(p.id, r.id, InformationChannel.divination, depth: depth);
+            for (final id in r.events.take(depth)) {
+              f.reveal(w.events[id]!, p.id, InformationChannel.divination);
+            }
+            action('天机显现', '推演确认了一条深层关系。');
+          } else {
+            action('天机未明', '推演未得确证，未显露未知对象。');
+          }
+        case 'startBattle':
+          final n = target();
+          w.battleTarget = n.id;
+          AdventureRules.start(w);
+          final e = f.event(
+            command.secret ? 'secretKill' : 'challenge',
+            '与${n.name}交战',
+            '${p.name}向${n.name}发起战斗。',
             [p.id, n.id],
-            causes: [Cause(origin.id, CausalKind.direct)],
-            witnessed: origin.kind != 'secretKill',
+            witnessed: !command.secret,
           );
-          AdventureRules.counter(w, f, disrupt: chosenSkill == '天机诀');
-        }
-      case 'flee':
-        if (w.battleTarget == null) {
-          throw const RuleViolation('当前没有战斗');
-        }
-        final n = w.entities[w.battleTarget]!;
-        if (p.realm >= n.realm || w.random.next(100) < 65) {
-          action('脱离战斗', '成功退走，交战的因果仍然存在。');
-          w.battleTarget = null;
-          w.battleOrigin = null;
+          w.battleOrigin = e.id;
           w.battleReward = null;
-        } else {
-          action('逃跑失败', '被对手追上。');
-          _counterattack(w, f);
+          AdventureRules.start(w);
+        case 'attack':
+        case 'skill':
+          if (w.battleTarget == null) {
+            throw const RuleViolation('当前没有战斗');
+          }
+          final n = w.entities[w.battleTarget]!;
+          final chosenSkill = command.kind == 'skill'
+              ? (command.item ?? w.style)
+              : null;
+          final damage = AdventureRules.attack(w, chosenSkill);
+          n.hp -= damage;
+          w.battleHp = n.hp;
+          final origin = w.events[w.battleOrigin]!;
+          if (n.hp <= 0) {
+            final e = f.event(
+              origin.kind == 'secretKill' ? 'secretKill' : 'victory',
+              '击败${n.name}',
+              '${n.name}在战斗中身亡。',
+              [p.id, n.id],
+              causes: [Cause(origin.id, CausalKind.direct)],
+              importance: 3,
+              witnessed: origin.kind != 'secretKill',
+            );
+            f.die(n, e);
+            p.coins += n.coins;
+            n.coins = 0;
+            if (w.battleReward == 'equipment') AdventureRules.award(w, f, e.id);
+            if (w.battleReward == 'coins') p.coins += 15 + p.realm * 5;
+            w.battleReward = null;
+            w.battleTarget = null;
+            w.battleOrigin = null;
+          } else {
+            f.event(
+              'battleRound',
+              '交战一合',
+              '对${n.name}造成 $damage 伤害。',
+              [p.id, n.id],
+              causes: [Cause(origin.id, CausalKind.direct)],
+              witnessed: origin.kind != 'secretKill',
+            );
+            AdventureRules.counter(w, f, disrupt: chosenSkill == '天机诀');
+          }
+        case 'flee':
+          if (w.battleTarget == null) {
+            throw const RuleViolation('当前没有战斗');
+          }
+          final n = w.entities[w.battleTarget]!;
+          if (p.realm >= n.realm || w.random.next(100) < 65) {
+            action('脱离战斗', '成功退走，交战的因果仍然存在。');
+            w.battleTarget = null;
+            w.battleOrigin = null;
+            w.battleReward = null;
+          } else {
+            action('逃跑失败', '被对手追上。');
+            _counterattack(w, f);
+          }
+        case 'wait':
+          action('静观世变', '三十日流转，世间修士各行其道。');
+        default:
+          throw const RuleViolation('未知行动');
+      }
+    }
+    // Attribute only real, completed player outcomes; never AI declarations.
+    for (final e
+        in w.events.values
+            .where(
+              (e) =>
+                  !original.events.containsKey(e.id) &&
+                  e.participants.contains(p.id),
+            )
+            .toList()) {
+      if (e.kind == 'travel') {
+        GrowthRules.insight(w, f, p, 'visit:${e.location}', 5, e);
+      } else if (e.kind == 'victory') {
+        final opponent = w.entities[e.participants.last];
+        if (opponent != null && opponent.realm >= p.realm) {
+          GrowthRules.insight(
+            w,
+            f,
+            p,
+            'battle:${opponent.id}',
+            5,
+            e,
+            cap: 'battle',
+          );
         }
-      case 'wait':
-        action('静观世变', '三十日流转，世间修士各行其道。');
-      default:
-        throw const RuleViolation('未知行动');
+      } else if (e.kind == 'quest' && e.importance == 3) {
+        GrowthRules.insight(w, f, p, 'quest:${command.item}', 10, e);
+      } else if (e.kind == 'encounterChoice' && command.item != 'leave') {
+        GrowthRules.insight(w, f, p, 'adventure:${e.location}', 5, e);
+      } else if (e.kind == 'trade' &&
+          command.amount > 0 &&
+          MapRules.materials.contains(command.item)) {
+        p.growthSources['${p.realm}:material:${command.item}'] = e.id;
+      }
     }
     if (!w.frozen && p.ageDays >= Content.lifespans[p.realm] * 360) {
       final e = action('寿元耗尽', '此世寿元已尽。', importance: 3);
       f.die(p, e);
     }
-    if (!w.frozen) {
+    if (!w.frozen && w.day > original.day) {
       simulation.advance(w, f, original.day);
     }
     if (w.frozen) {
@@ -1084,7 +1185,8 @@ class GameCommandService {
     return w;
   }
 
-  static int maxHp(Entity e) => 100 + e.realm * 40;
+  static int maxHp(Entity e) =>
+      (100 + e.realm * 40) * (100 + e.stage * 5) ~/ 100;
   void _counterattack(World w, FactWriter f) {
     AdventureRules.counter(w, f);
   }
@@ -1131,28 +1233,45 @@ class WorldSimulationService {
         f.die(n, e);
         continue;
       }
-      n.spirit += elapsed ~/ 30 * (18 + (n.personality == '重义' ? 4 : 0));
       n.updated = w.day;
-      final rescue = f.last(n.id, 'rescue');
-      if (n.realm < 8 && n.spirit >= (n.realm + 1) * 60) {
-        n.spirit -= (n.realm + 1) * 60;
-        n.realm++;
-        n.hp = GameCommandService.maxHp(n);
-        f.event(
-          'npcBreakthrough',
-          '${n.name}突破${Content.realms[n.realm]}',
-          '经长期修炼，境界获得突破。',
-          [n.id],
-          location: n.location,
-          importance: 3,
-          causes: rescue == null
-              ? []
-              : [Cause(rescue.id, CausalKind.influence)],
-        );
+      final returnDebt = (f.adjacency[n.id] ?? <Relation>[])
+          .where(
+            (r) =>
+                r.source == n.id &&
+                r.target == w.playerId &&
+                r.type == KarmaRelationType.gratitude &&
+                r.status == RelationStatus.active &&
+                w.knows(n.id, r.id),
+          )
+          .firstOrNull;
+      final rememberedHome =
+          w.knowledge['${n.id}|${w.playerId}']?.snapshot['location'] as String?;
+      final returning =
+          returnDebt != null &&
+          n.realm >= 1 &&
+          n.sect != null &&
+          w.day - returnDebt.created >= 90 &&
+          rememberedHome != null;
+      if (returning) {
+        if (n.location != rememberedHome) {
+          final path = MapRepository(w, observer: n.id).route(rememberedHome);
+          if (path != null && path.isNotEmpty) {
+            GrowthRules.moveNpc(w, f, n, path.first);
+          }
+        }
+      } else {
+        GrowthRules.npc(w, f, n, elapsed);
       }
+      if (!n.alive) continue;
       if (n.realm >= 1 && n.sect == null) {
         final sects = w.entities.values
-            .where((s) => s.type == KarmaNodeType.sect && s.alive)
+            .where(
+              (s) =>
+                  s.type == KarmaNodeType.sect &&
+                  s.alive &&
+                  w.knows(n.id, s.id) &&
+                  s.location == n.location,
+            )
             .toList();
         if (sects.isNotEmpty) {
           n.sect = sects[w.random.next(sects.length)].id;
@@ -1189,6 +1308,7 @@ class WorldSimulationService {
           .toList();
       if (debts.isNotEmpty &&
           n.realm >= 1 &&
+          n.sect != null &&
           w.day - debts.first.created >= 90 &&
           w.player.alive) {
         final r = debts.first;
@@ -1197,16 +1317,26 @@ class WorldSimulationService {
         final remembered =
             w.knowledge['${n.id}|${w.playerId}']?.snapshot['location']
                 as String?;
-        if (remembered != null) {
-          n.location = remembered;
-        }
+        if (remembered == null || n.location != remembered) continue;
         if (n.location != w.player.location) {
           continue;
         }
         for (final kind in ['npcBreakthrough', 'npcJoin']) {
           final report = f.last(n.id, kind);
           if (report != null && w.knows(n.id, report.id)) {
-            f.reveal(report, w.playerId, InformationChannel.told, source: n.id);
+            final queue = <GameEvent>[report];
+            final disclosed = <String>{};
+            while (queue.isNotEmpty && disclosed.length < 100) {
+              final item = queue.removeLast();
+              if (!disclosed.add(item.id) || !w.knows(n.id, item.id)) continue;
+              f.reveal(item, w.playerId, InformationChannel.told, source: n.id);
+              for (final cause in item.causes) {
+                final parent = w.events[cause.eventId];
+                if (parent != null && w.knows(n.id, parent.id)) {
+                  queue.add(parent);
+                }
+              }
+            }
           }
         }
         final crisis = f.event('crisis', '妖潮侵袭', '旅途中遇到妖潮，修士需合力抵御。', [
@@ -1260,18 +1390,15 @@ class WorldSimulationService {
         }
       }
       final choice = w.random.next(4);
-      if (choice == 0) {
-        n.location = '${w.id}:location:${w.random.next(Content.places.length)}';
-        f.event(
-          'migration',
-          '${n.name}迁行',
-          '离开旧地，前往${w.entities[n.location]!.name}。',
-          [n.id],
-          location: n.location,
-        );
-      } else if (choice == 1) {
-        n.coins += 8;
-        f.event('npcTrade', '${n.name}经商', '出售采集所得，积累修行资源。', [
+      if (choice == 1 &&
+          [
+            PlaceKind.town,
+            PlaceKind.market,
+          ].contains(w.mapPlaces[n.location]?.kind) &&
+          (n.supplies['灵草'] ?? 0) > 0) {
+        n.supplies['灵草'] = n.supplies['灵草']! - 1;
+        n.coins += 4;
+        f.event('npcTrade', '${n.name}经商', '出售实际持有的灵草，积累修行资源。', [
           n.id,
         ], location: n.location);
       } else if (choice == 2) {

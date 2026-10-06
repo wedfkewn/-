@@ -254,8 +254,9 @@ class CultivationPage extends StatelessWidget {
                   ),
                 ),
                 _ActionRow(
-                  title: '尝试突破',
-                  subtitle: '汇聚灵气，冲击境界瓶颈。',
+                  title: view.growth.stage < 3 ? '境界成长' : '突破准备',
+                  subtitle:
+                      '根基 ${view.growth.foundation} · 感悟 ${view.growth.insight} · 查看条件与历练',
                   icon: Icons.arrow_upward,
                   onTap: frozen ? null : () => onCommand('breakthrough'),
                 ),
@@ -295,8 +296,10 @@ class CultivationPage extends StatelessWidget {
                       child: const Text('服回春丹'),
                     ),
                     TextButton(
-                      onPressed: frozen ? null : () => onCommand('flee'),
-                      child: const Text('尝试脱身'),
+                      onPressed: frozen || view.inTribulation
+                          ? null
+                          : () => onCommand('flee'),
+                      child: Text(view.inTribulation ? '雷劫不可逃离' : '尝试脱身'),
                     ),
                   ],
                 ),
