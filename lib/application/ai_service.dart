@@ -32,20 +32,26 @@ class AiSettings {
     world: j['world'] ?? false,
     consent: j['consent'] ?? false,
   );
-  Uri get endpoint {
+  Uri endpointFor(String path) {
     final uri = Uri.tryParse(base.trim());
     if (uri == null ||
         uri.scheme != 'https' ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
         uri.hasQuery ||
-        uri.hasFragment ||
-        model.trim().isEmpty) {
-      throw const AiFailure('配置错误：请填写 HTTPS API 基础地址与模型名称');
+        uri.hasFragment) {
+      throw const AiFailure('配置错误：请填写 HTTPS API 基础地址');
     }
     return uri.replace(
-      path: '${uri.path.replaceAll(RegExp(r'/+$'), '')}/chat/completions',
+      path: '${uri.path.replaceAll(RegExp(r'/+$'), '')}/$path',
     );
+  }
+
+  Uri get endpoint {
+    if (model.trim().isEmpty) {
+      throw const AiFailure('配置错误：请填写模型名称');
+    }
+    return endpointFor('chat/completions');
   }
 }
 
@@ -82,6 +88,78 @@ class AiReply {
 class AiClient {
   AiClient({Dio? dio}) : dio = dio ?? Dio();
   final Dio dio;
+  Future<List<String>> listModels(
+    AiSettings settings,
+    String key,
+    CancelToken token,
+  ) async {
+    final endpoint = settings.endpointFor('models');
+    if (key.trim().isEmpty) throw const AiFailure('配置错误：请填写 API 密钥');
+    try {
+      final response = await dio
+          .getUri<dynamic>(
+            endpoint,
+            options: Options(
+              headers: {'Authorization': 'Bearer ${key.trim()}'},
+              sendTimeout: const Duration(seconds: 30),
+              receiveTimeout: const Duration(seconds: 30),
+              followRedirects: false,
+            ),
+            cancelToken: token,
+          )
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              token.cancel();
+              throw const AiFailure('请求超时');
+            },
+          );
+      if (token.isCancelled) throw const AiFailure('请求已取消');
+      final body = response.data is String
+          ? jsonDecode(response.data)
+          : response.data;
+      if (body is! Map ||
+          body['data'] is! List ||
+          (body['data'] as List).length > 10000) {
+        throw const AiFailure('模型列表格式不正确，可手动填写模型名称');
+      }
+      final models = <String>{};
+      for (final item in body['data']) {
+        final id = item is Map ? item['id'] : null;
+        if (id is! String ||
+            id.trim().isEmpty ||
+            id.length > 200 ||
+            RegExp(r'[\x00-\x1f\x7f]').hasMatch(id)) {
+          throw const AiFailure('模型列表格式不正确，可手动填写模型名称');
+        }
+        models.add(id.trim());
+      }
+      if (models.isEmpty) throw const AiFailure('服务商未返回模型，可手动填写模型名称');
+      return models.toList()..sort();
+    } on AiFailure {
+      rethrow;
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) throw const AiFailure('请求已取消');
+      if ([404, 405].contains(e.response?.statusCode)) {
+        throw const AiFailure('服务商不支持模型检测，可手动填写模型名称');
+      }
+      if (e.response?.statusCode == 429) throw const AiFailure('服务限流，请稍后再试');
+      if ([400, 401, 403, 422].contains(e.response?.statusCode)) {
+        throw const AiFailure('配置错误：请检查地址与密钥');
+      }
+      if ([
+        DioExceptionType.connectionTimeout,
+        DioExceptionType.receiveTimeout,
+        DioExceptionType.sendTimeout,
+      ].contains(e.type)) {
+        throw const AiFailure('请求超时');
+      }
+      throw const AiFailure('网络或服务不可用');
+    } catch (_) {
+      throw const AiFailure('模型列表格式不正确，可手动填写模型名称');
+    }
+  }
+
   Future<AiReply> request(
     AiSettings settings,
     String key,
@@ -224,12 +302,29 @@ class AiContentService {
     ], 'test');
   }
 
+  Future<List<String>> detectModels(AiSettings s, String pendingKey) async {
+    s.endpointFor('models');
+    final key = pendingKey.trim().isNotEmpty
+        ? pendingKey.trim()
+        : await _storedKeyFor(s, requireEnabled: false, requireModel: false);
+    if (_token != null) throw const AiFailure('已有请求进行中');
+    final token = CancelToken();
+    _token = token;
+    try {
+      return await client.listModels(s, key, token);
+    } finally {
+      if (identical(_token, token)) _token = null;
+    }
+  }
+
   Future<String> _storedKeyFor(
     AiSettings expected, {
     bool requireEnabled = true,
+    bool requireModel = true,
   }) async {
     final saved = await settings();
-    if (saved.base != expected.base || saved.model != expected.model) {
+    if (saved.base != expected.base ||
+        (requireModel && saved.model != expected.model)) {
       throw const AiFailure('配置已变化，请保存当前服务商的密钥后重试');
     }
     final key = await secrets.read() ?? '';
@@ -237,7 +332,8 @@ class AiContentService {
     if (requireEnabled && (!latest.enabled || !latest.consent)) {
       throw const AiFailure('AI已关闭，使用本地内容');
     }
-    if (latest.base != expected.base || latest.model != expected.model) {
+    if (latest.base != expected.base ||
+        (requireModel && latest.model != expected.model)) {
       throw const AiFailure('配置已变化，请重新生成');
     }
     return key;

@@ -126,6 +126,193 @@ const settings = AiSettings(
 );
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'model discovery uses GET without a selected model and deduplicates IDs',
+    () async {
+      final adapter = Adapter({
+        'data': [
+          {'id': 'z-model'},
+          {'id': 'a-model'},
+          {'id': 'z-model'},
+        ],
+      });
+      final dio = Dio()..httpClientAdapter = adapter;
+      expect(
+        await AiClient(dio: dio).listModels(
+          const AiSettings(base: 'https://example.test/v1/'),
+          'fake-key',
+          CancelToken(),
+        ),
+        ['a-model', 'z-model'],
+      );
+      expect(adapter.options!.method, 'GET');
+      expect(adapter.options!.uri.toString(), 'https://example.test/v1/models');
+      expect(adapter.options!.headers['Authorization'], 'Bearer fake-key');
+      expect(adapter.options!.followRedirects, isFalse);
+      expect(adapter.options!.data, isNull);
+    },
+  );
+  test(
+    'model discovery rejects malformed lists and classifies unsupported/auth/timeout',
+    () async {
+      for (final body in [
+        {'data': []},
+        {
+          'data': [
+            {'id': 3},
+          ],
+        },
+        {
+          'data': [
+            {'id': 'bad\nname'},
+          ],
+        },
+        {'choices': []},
+      ]) {
+        final dio = Dio()..httpClientAdapter = Adapter(body);
+        await expectLater(
+          AiClient(dio: dio).listModels(settings, 'fake', CancelToken()),
+          throwsA(isA<AiFailure>()),
+        );
+      }
+      for (final code in [401, 404, 429]) {
+        final dio = Dio()..httpClientAdapter = Adapter({}, status: code);
+        await expectLater(
+          AiClient(dio: dio).listModels(settings, 'fake', CancelToken()),
+          throwsA(
+            isA<AiFailure>().having(
+              (e) => e.message,
+              'safe classification',
+              contains(
+                code == 401
+                    ? '配置错误'
+                    : code == 404
+                    ? '不支持'
+                    : '限流',
+              ),
+            ),
+          ),
+        );
+      }
+      final dio = Dio()
+        ..httpClientAdapter = Adapter(
+          {},
+          error: DioExceptionType.receiveTimeout,
+        );
+      await expectLater(
+        AiClient(dio: dio).listModels(settings, 'fake', CancelToken()),
+        throwsA(isA<AiFailure>().having((e) => e.message, 'timeout', '请求超时')),
+      );
+      final cancelled = CancelToken()..cancel();
+      await expectLater(
+        AiClient().listModels(settings, 'fake', cancelled),
+        throwsA(isA<AiFailure>().having((e) => e.message, 'cancel', '请求已取消')),
+      );
+    },
+  );
+  test(
+    'discovery reuses a key only at saved URL and does not save settings or generation usage',
+    () async {
+      final db = GameDatabase.memory();
+      addTearDown(db.close);
+      final secrets = MemorySecrets()..value = 'saved-secret';
+      await db.saveSettings(settings.toJson());
+      final adapter = Adapter({
+        'data': [
+          {'id': 'found-model'},
+        ],
+      });
+      final service = AiContentService(
+        db,
+        AiClient(dio: Dio()..httpClientAdapter = adapter),
+        secrets,
+      );
+      expect(await service.detectModels(AiSettings(base: settings.base), ''), [
+        'found-model',
+      ]);
+      expect(adapter.options!.headers['Authorization'], 'Bearer saved-secret');
+      adapter.options = null;
+      await expectLater(
+        service.detectModels(
+          const AiSettings(base: 'https://other.test/v1'),
+          '',
+        ),
+        throwsA(isA<AiFailure>()),
+      );
+      expect(adapter.options, isNull);
+      expect(
+        await service.detectModels(
+          const AiSettings(base: 'https://other.test/v1'),
+          'new-key',
+        ),
+        ['found-model'],
+      );
+      expect(adapter.options!.headers['Authorization'], 'Bearer new-key');
+      expect(secrets.value, 'saved-secret');
+      expect(await db.settings(), settings.toJson());
+      expect(await db.usage(), isEmpty);
+    },
+  );
+  testWidgets(
+    'URL and key can detect and select a model before settings are saved',
+    (tester) async {
+      final db = GameDatabase.memory();
+      addTearDown(db.close);
+      final adapter = Adapter({
+        'data': [
+          {'id': 'dialogue-model'},
+          {'id': 'other-model'},
+        ],
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            databaseProvider.overrideWithValue(db),
+            secretStoreProvider.overrideWithValue(MemorySecrets()),
+            aiClientProvider.overrideWithValue(
+              AiClient(dio: Dio()..httpClientAdapter = adapter),
+            ),
+          ],
+          child: MaterialApp(
+            theme: InkTheme.build(Brightness.light),
+            home: const AiSettingsPage(),
+          ),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      Finder field(String label) => find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.decoration?.labelText == label,
+      );
+      await tester.enterText(field('API 基础地址'), settings.base);
+      await tester.enterText(field('API 密钥'), 'temporary-secret');
+      await tester.runAsync(() async {
+        await tester.tap(find.text('检测模型'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('选择模型 · 2 个'), findsOneWidget);
+      await tester.enterText(field('搜索模型'), 'dialogue');
+      await tester.pumpAndSettle();
+      expect(find.text('other-model'), findsNothing);
+      await tester.runAsync(() async {
+        await tester.tap(find.text('dialogue-model'));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(field('模型名称')).controller!.text,
+        'dialogue-model',
+      );
+      expect(adapter.options!.method, 'GET');
+      expect(await tester.runAsync(db.settings), isEmpty);
+      expect(await tester.runAsync(db.usage), isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
   setUpAll(() async {
     for (final e in {
       'MaShan': 'MaShanZheng-Regular.ttf',

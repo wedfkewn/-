@@ -24,6 +24,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
   String previousHost = '', message = '';
   List<Map<String, dynamic>> usage = [];
   Map<String, int> totals = {};
+  AiContentService? detectingService;
   @override
   void initState() {
     super.initState();
@@ -53,10 +54,84 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
 
   @override
   void dispose() {
+    detectingService?.cancel();
     base.dispose();
     model.dispose();
     key.dispose();
     super.dispose();
+  }
+
+  Future<void> detectModels() async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      message = '正在检测模型…';
+    });
+    final service = ref.read(aiServiceProvider);
+    detectingService = service;
+    try {
+      final models = await service.detectModels(
+        AiSettings(base: base.text.trim()),
+        key.text,
+      );
+      detectingService = null;
+      if (!mounted) return;
+      var query = '';
+      final selected = await showDialog<String>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, update) {
+            final filtered = models
+                .where((id) => id.toLowerCase().contains(query.toLowerCase()))
+                .toList();
+            return AlertDialog(
+              title: Text('选择模型 · ${models.length} 个'),
+              content: SizedBox(
+                width: 420,
+                height: 360,
+                child: Column(
+                  children: [
+                    TextField(
+                      decoration: const InputDecoration(labelText: '搜索模型'),
+                      onChanged: (value) => update(() => query = value),
+                    ),
+                    Expanded(
+                      child: filtered.isEmpty
+                          ? const Center(child: Text('没有匹配的模型'))
+                          : ListView.builder(
+                              itemCount: filtered.length,
+                              itemBuilder: (ctx, i) => ListTile(
+                                title: Text(filtered[i]),
+                                onTap: () => Navigator.pop(ctx, filtered[i]),
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('返回'),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+      if (!mounted) return;
+      if (selected != null) model.text = selected;
+      message = selected == null
+          ? '已检测到 ${models.length} 个模型'
+          : '已选择 $selected，请保存设置；可用性可通过测试连接确认。';
+    } on AiFailure catch (e) {
+      message = e.message;
+    } catch (_) {
+      message = '模型检测失败，可手动填写模型名称';
+    } finally {
+      detectingService = null;
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> perform(bool test) async {
@@ -156,11 +231,6 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
                     ),
                   ),
                   TextField(
-                    controller: model,
-                    enabled: !busy,
-                    decoration: const InputDecoration(labelText: '模型名称'),
-                  ),
-                  TextField(
                     controller: key,
                     enabled: !busy,
                     obscureText: true,
@@ -169,6 +239,29 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
                     decoration: InputDecoration(
                       labelText: 'API 密钥',
                       hintText: hasKey ? '已安全保存，留空保留' : '只保存在本机安全存储',
+                    ),
+                  ),
+                  Wrap(
+                    spacing: 12,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : detectModels,
+                        icon: const Icon(Icons.search),
+                        label: const Text('检测模型'),
+                      ),
+                      if (detectingService != null)
+                        TextButton(
+                          onPressed: () => detectingService?.cancel(),
+                          child: const Text('取消检测'),
+                        ),
+                    ],
+                  ),
+                  TextField(
+                    controller: model,
+                    enabled: !busy,
+                    decoration: const InputDecoration(
+                      labelText: '模型名称',
+                      hintText: '点击检测选择，或手动填写',
                     ),
                   ),
                   SwitchListTile(
