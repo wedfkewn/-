@@ -194,6 +194,7 @@ class AiContentService {
     String? key, {
     bool hostConfirmed = false,
   }) async {
+    if (_token != null) throw const AiFailure('请先取消正在进行的请求，再修改设置');
     next.endpoint;
     final previous = await settings();
     final changed =
@@ -201,6 +202,11 @@ class AiContentService {
         Uri.tryParse(previous.base)?.host != Uri.tryParse(next.base)?.host;
     if (changed && !hostConfirmed) throw const AiFailure('修改服务商后需重新确认保存密钥');
     if (next.enabled && !next.consent) throw const AiFailure('开启前需同意发送相关游戏背景');
+    // Secret storage and SQLite cannot share a transaction. Publish a disabled
+    // destination first, so interruption never pairs a new key with an old host.
+    if (changed || key?.trim().isNotEmpty == true) {
+      await db.saveSettings({...next.toJson(), 'enabled': false});
+    }
     if (changed) await secrets.delete();
     if (key != null && key.trim().isNotEmpty) await secrets.write(key.trim());
     if (next.enabled && (await secrets.read())?.isNotEmpty != true) {
@@ -211,11 +217,30 @@ class AiContentService {
 
   Future<void> test(AiSettings s, String? pendingKey) async {
     final key = pendingKey?.isNotEmpty == true
-        ? pendingKey!
-        : await secrets.read() ?? '';
+        ? pendingKey!.trim()
+        : await _storedKeyFor(s, requireEnabled: false);
     await _request(s, key, [
       {'role': 'user', 'content': '请回复：连接成功。'},
     ], 'test');
+  }
+
+  Future<String> _storedKeyFor(
+    AiSettings expected, {
+    bool requireEnabled = true,
+  }) async {
+    final saved = await settings();
+    if (saved.base != expected.base || saved.model != expected.model) {
+      throw const AiFailure('配置已变化，请保存当前服务商的密钥后重试');
+    }
+    final key = await secrets.read() ?? '';
+    final latest = await settings();
+    if (requireEnabled && (!latest.enabled || !latest.consent)) {
+      throw const AiFailure('AI已关闭，使用本地内容');
+    }
+    if (latest.base != expected.base || latest.model != expected.model) {
+      throw const AiFailure('配置已变化，请重新生成');
+    }
+    return key;
   }
 
   Future<AiReply> _request(
@@ -334,7 +359,7 @@ class AiContentService {
         : kind == 'talk'
         ? '仅返回JSON {"reply":"人物回答","news":[]}。news只能引用目录中最多2个情报id，不要在回答中出现id。'
         : '仅返回JSON {"action":"目录中的action","text":"事件经过"}。';
-    final reply = await _request(s, await secrets.read() ?? '', [
+    final reply = await _request(s, await _storedKeyFor(s), [
       {
         'role': 'system',
         'content':

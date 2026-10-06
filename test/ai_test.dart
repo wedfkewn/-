@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -29,6 +30,17 @@ class MemorySecrets implements SecretStore {
   @override
   Future<void> delete() async {
     value = null;
+  }
+}
+
+class FailingSettingsDb extends GameDatabase {
+  FailingSettingsDb() : super(NativeDatabase.memory());
+  bool fail = false;
+  int writes = 0;
+  @override
+  Future<void> saveSettings(Map<String, dynamic> values) async {
+    if (fail && ++writes == 2) throw StateError('injected settings failure');
+    await super.saveSettings(values);
   }
 }
 
@@ -715,6 +727,40 @@ void main() {
       await db.save(advanced, previous: w);
       await expectLater(db.save(generated, previous: w), throwsStateError);
       expect((await db.load())!.day, 30);
+    },
+  );
+  test(
+    'interrupted host change stays disabled and never sends replacement key to old host',
+    () async {
+      final db = FailingSettingsDb();
+      addTearDown(db.close);
+      final secrets = MemorySecrets();
+      final client = FixtureClient();
+      final service = AiContentService(db, client, secrets);
+      await service.saveSettings(settings, 'original');
+      db.fail = true;
+      const next = AiSettings(
+        base: 'https://replacement.test/v1',
+        model: 'other',
+        enabled: true,
+        consent: true,
+      );
+      await expectLater(
+        service.saveSettings(next, 'replacement', hostConfirmed: true),
+        throwsStateError,
+      );
+      expect((await service.settings()).enabled, isFalse);
+      expect((await service.settings()).base, next.base);
+      final w = WorldGenerator.generate(
+        seed: 'host',
+        worldId: 'host',
+        npcCount: 5,
+      );
+      await expectLater(
+        service.generate(w, 'explore', settings),
+        throwsA(isA<AiFailure>()),
+      );
+      expect(client.calls, 0);
     },
   );
 }

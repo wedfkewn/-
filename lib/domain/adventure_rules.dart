@@ -78,7 +78,20 @@ abstract final class AdventureRules {
     final hurt = local
         .where((n) => n.hp < GameCommandService.maxHp(n))
         .firstOrNull;
-    final enemy = local.where((n) => n.realm <= w.player.realm + 1).firstOrNull;
+    final enemy = local
+        .where(
+          (n) =>
+              n.realm <= w.player.realm + 1 &&
+              (n.personality == '好战' ||
+                  w.relations.values.any(
+                    (r) =>
+                        r.source == n.id &&
+                        r.target == w.playerId &&
+                        r.type == KarmaRelationType.hatred &&
+                        !r.resolved,
+                  )),
+        )
+        .firstOrNull;
     return [
       const EncounterOption('herbs', '采集灵草', ['herbs']),
       const EncounterOption('treasure', '拾取遗宝', ['coins']),
@@ -93,13 +106,13 @@ abstract final class AdventureRules {
       if ((w.quests['古碑'] ?? 0) < 3)
         const EncounterOption('tablet', '拓下残碑线索', ['quest'], cost: 10),
       if (enemy != null)
-        EncounterOption('escort', '护送商旅 · 迎敌', [
+        EncounterOption('escort', '护送商旅 · 迎战${enemy.name}', [
           'battle',
           'equipment',
         ], target: enemy.id),
       const EncounterOption('weapon', '修复遗落兵器', ['equipment'], cost: 10),
       if (enemy != null)
-        EncounterOption('ambush', '迎战伏击者', [
+        EncounterOption('ambush', '迎战${enemy.name}的伏击', [
           'battle',
           'coins',
         ], target: enemy.id),

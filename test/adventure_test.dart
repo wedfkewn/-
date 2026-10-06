@@ -32,6 +32,7 @@ void main() {
         );
         n.location = w.player.location;
         n.realm = 0;
+        n.personality = '好战';
         n.hp = 50;
         w.discover(w.playerId, n.id, InformationChannel.witness);
         final e = AdventureRules.discover(w, FactWriter(w), null);
@@ -156,6 +157,7 @@ void main() {
       );
       n.location = w.player.location;
       n.realm = 0;
+      n.personality = '好战';
       n.hp = 18;
       n.lastActed = 10000;
       w.discover(w.playerId, n.id, InformationChannel.witness);
@@ -244,6 +246,7 @@ void main() {
         );
         n.location = w.player.location;
         n.realm = 0;
+        n.personality = '好战';
         n.hp = 100;
         n.lastActed = 10000;
         w.discover(w.playerId, n.id, InformationChannel.witness);
