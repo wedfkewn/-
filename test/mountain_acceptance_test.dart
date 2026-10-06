@@ -73,6 +73,10 @@ void main() {
       }
       expect(guardian, 'loop:npc:97');
       act(GameCommand('breakthrough', target: guardian));
+      expect(w.player.realm, 0);
+      while (w.tribulation != null && !w.frozen) {
+        act(const GameCommand('defend'));
+      }
       expect(w.player.realm, 1);
       expect(w.player.stage, 0);
       expect(w.events.values.where((e) => e.kind == 'advanceStage').length, 3);

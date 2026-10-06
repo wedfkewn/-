@@ -71,6 +71,9 @@ void main() {
           w = walk(w, 'game:location:0');
         }
         w = c.execute(w, const GameCommand('breakthrough'));
+        while (w.tribulation != null && !w.frozen) {
+          w = c.execute(w, const GameCommand('defend'));
+        }
       }
       expect(w.player.realm, 1);
       expect(Content.lifespans[w.player.realm], greaterThan(120));

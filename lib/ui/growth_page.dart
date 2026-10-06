@@ -119,9 +119,7 @@ class _GrowthPageState extends ConsumerState<GrowthPage> {
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('使用护脉丹'),
-                subtitle: Text(
-                  '持有 ${v.inventory['护脉丹'] ?? 0} · 普通突破+10%，雷劫+50护盾',
-                ),
+                subtitle: Text('持有 ${v.inventory['护脉丹'] ?? 0} · 雷劫+50护盾'),
                 value: pill,
                 onChanged: disabled
                     ? null
@@ -157,12 +155,12 @@ class _GrowthPageState extends ConsumerState<GrowthPage> {
               ),
               if (g.highTrial) ...[
                 Text(
-                  '永久死亡风险：须在渡劫台承受${v.realmIndex == 6 ? 3 : 5}道雷劫，提前预告招式。开始后不能逃跑。',
+                  '准备护盾 ${g.shield} · 通过雷劫后晋升${Content.realms[v.realmIndex + 1]}',
+                ),
+                Text(
+                  '永久死亡风险：${v.realmIndex >= 6 ? '须在渡劫台' : '在合适突破地点'}承受${g.trialRounds}道雷劫，提前预告招式。开始后不能逃跑。',
                 ),
                 const Text('通过雷劫即突破，不额外抽取成功率；准备提高护盾，防御、功法和回春丹用于渡劫。'),
-              ] else ...[
-                Text('本次成功率 ${g.chance}%'),
-                const Text('失败消耗材料及门槛修为20%，损失当前气血30%，至少保留1点，并产生突破伤势。'),
               ],
             ],
             if (g.missing.isNotEmpty) ...g.missing.map((s) => Text('· $s')),

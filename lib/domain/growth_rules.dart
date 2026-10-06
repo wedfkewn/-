@@ -1,6 +1,12 @@
 part of 'engine.dart';
 
 abstract final class GrowthRules {
+  static int trialRounds(int realm) => realm == 7 ? 5 : 3;
+  static int trialShield(Entity p, {bool pill = false, bool guarded = false}) =>
+      20 +
+      (p.foundation - rootRequired(p)).clamp(0, 20) * 2 +
+      (pill ? 50 : 0) +
+      (guarded ? 50 : 0);
   static Map<String, int> pack(World w, Entity actor) =>
       actor.id == w.playerId ? w.inventory : actor.supplies;
   static bool injured(World w, Entity p) =>
@@ -62,13 +68,6 @@ abstract final class GrowthRules {
             .map((n) => n.id)
             .toList()
           ..sort();
-    final chance =
-        (50 +
-                (p.foundation - rootRequired(p)).clamp(0, 20) +
-                (pill ? 10 : 0) +
-                (guards.contains(guard) ? 10 : 0) +
-                (w.mapPlaces[p.location]?.kind == PlaceKind.vein ? 5 : 0))
-            .clamp(0, 95);
     final missing = <String>[
       if (terminal) '已至渡劫圆满',
       if (p.spirit < Content.threshold(p.realm, p.stage)) '修为不足',
@@ -97,9 +96,10 @@ abstract final class GrowthRules {
       rootRequired: rootRequired(p),
       insightRequired: p.stage == 3 ? p.attributes.insightRequired(p.realm) : 0,
       material: material,
-      chance: chance,
+      trialRounds: p.stage == 3 && !terminal ? trialRounds(p.realm) : 0,
+      shield: trialShield(p, pill: pill, guarded: guards.contains(guard)),
       injured: injured(w, p),
-      highTrial: p.stage == 3 && p.realm >= 6,
+      highTrial: p.stage == 3 && !terminal,
       terminal: terminal,
       missing: missing,
       guards: guards,
@@ -290,37 +290,18 @@ abstract final class GrowthRules {
       causes: [...sources(w, p), ...guardSources(w, f, p, command.target)],
       importance: 3,
     );
-    if (preview.highTrial) {
-      p.spirit -= preview.threshold;
-      w.tribulation = Tribulation(
-        preparation.id,
-        p.realm == 6 ? 3 : 5,
-        20 +
-            (p.foundation - preview.rootRequired).clamp(0, 20) * 2 +
-            (command.item == null ? 0 : 50) +
-            (command.target == null ? 0 : 50),
-        guard: command.target,
-      );
-      w.battleQi = EquipmentRules.maxQi(w);
-      return;
-    }
-    if (w.random.next(100) < preview.chance) {
-      p.spirit -= preview.threshold;
-      complete(w, f, p, preparation);
-    } else {
-      p.spirit -= (preview.threshold * .2).ceil();
-      p.hp = (p.hp - (p.hp * .3).ceil()).clamp(1, GameCommandService.maxHp(p));
-      p.injuryDay = w.day;
-      p.stabilizedDay = -1;
-      final e = f.event(
-        'breakthroughFailed',
-        '突破受挫',
-        '损失门槛修为20%，气血损失30%；须经过30日、稳固并恢复80%气血。',
-        [p.id],
-        causes: [Cause(preparation.id, CausalKind.direct)],
-      );
-      p.growthSources['${p.realm}:failure:${e.id}'] = e.id;
-    }
+    p.spirit -= preview.threshold;
+    w.tribulation = Tribulation(
+      preparation.id,
+      trialRounds(p.realm),
+      trialShield(
+        p,
+        pill: command.item == '护脉丹',
+        guarded: command.target != null,
+      ),
+      guard: command.target,
+    );
+    w.battleQi = EquipmentRules.maxQi(w);
   }
 
   static void complete(World w, FactWriter f, Entity p, GameEvent origin) {
@@ -588,70 +569,38 @@ abstract final class GrowthRules {
         location: n.location,
         causes: sources(w, n),
       );
-      if (n.realm >= 6) {
-        n.spirit -= threshold;
-        var shield =
-            20 +
-            (n.foundation - rootRequired(n)).clamp(0, 20) * 2 +
-            (pill ? 50 : 0) +
-            (guard == null ? 0 : 50);
-        GameEvent result = origin;
-        for (var turn = 0; turn < (n.realm == 6 ? 3 : 5); turn++) {
-          // Same lightning coefficients and defense modifier as player trials.
-          var damage = 70 + n.realm * 9 + (turn.isOdd ? 45 : 0);
-          if (n.personality != '好战') {
-            damage = (damage * .5).ceil();
-          } else {
-            damage -= ((18 + n.realm * 14) * (1 + n.stage * .05)).floor() ~/ 3;
-          }
-          if (n.hp < GameCommandService.maxHp(n) ~/ 2 &&
-              (inventory['回春丹'] ?? 0) > 0) {
-            inventory['回春丹'] = inventory['回春丹']! - 1;
-            n.hp = (n.hp + 65).clamp(0, GameCommandService.maxHp(n));
-          }
-          final absorbed = damage.clamp(0, shield);
-          shield -= absorbed;
-          n.hp -= damage - absorbed;
-          result = f.event(
-            'npcTribulation',
-            '${n.name}承受第${turn + 1}道雷劫',
-            '依准备与行动承受雷劫。',
-            [n.id],
-            location: n.location,
-            causes: [Cause(result.id, CausalKind.direct)],
-          );
-          if (n.hp <= 0) {
-            f.die(n, result);
-            return;
-          }
-        }
-        complete(w, f, n, result);
-      } else {
-        final chance =
-            (50 +
-                    (n.foundation - rootRequired(n)).clamp(0, 20) +
-                    (pill ? 10 : 0) +
-                    (guard == null ? 0 : 10) +
-                    (point.kind == PlaceKind.vein ? 5 : 0))
-                .clamp(0, 95);
-        if (w.random.next(100) < chance) {
-          n.spirit -= threshold;
-          complete(w, f, n, origin);
+      n.spirit -= threshold;
+      var shield = trialShield(n, pill: pill, guarded: guard != null);
+      GameEvent result = origin;
+      for (var turn = 0; turn < trialRounds(n.realm); turn++) {
+        var damage = 70 + n.realm * 9 + (turn.isOdd ? 45 : 0);
+        if (n.personality != '好战') {
+          damage = (damage * .5).ceil();
         } else {
-          n.spirit -= (threshold * .2).ceil();
-          n.hp = (n.hp * .7).floor().clamp(1, GameCommandService.maxHp(n));
-          n.injuryDay = w.day;
-          n.stabilizedDay = -1;
-          f.event(
-            'npcBreakthroughFailed',
-            '${n.name}突破受挫',
-            '材料消耗，修为损失20%，需调息恢复。',
-            [n.id],
-            location: n.location,
-            causes: [Cause(origin.id, CausalKind.direct)],
-          );
+          damage -= ((18 + n.realm * 14) * (1 + n.stage * .05)).floor() ~/ 3;
+        }
+        if (n.hp < GameCommandService.maxHp(n) ~/ 2 &&
+            (inventory['回春丹'] ?? 0) > 0) {
+          inventory['回春丹'] = inventory['回春丹']! - 1;
+          n.hp = (n.hp + 65).clamp(0, GameCommandService.maxHp(n));
+        }
+        final absorbed = damage.clamp(0, shield);
+        shield -= absorbed;
+        n.hp -= damage - absorbed;
+        result = f.event(
+          'npcTribulation',
+          '${n.name}承受第${turn + 1}道雷劫',
+          '依准备与行动承受雷劫。',
+          [n.id],
+          location: n.location,
+          causes: [Cause(result.id, CausalKind.direct)],
+        );
+        if (n.hp <= 0) {
+          f.die(n, result);
+          return;
         }
       }
+      complete(w, f, n, result);
       return;
     }
     if (!n.growthSources.containsKey('${n.realm}:place:${n.location}')) {

@@ -184,8 +184,10 @@ void main() {
       await tester.ensureVisible(find.text(guardian.name));
       await tester.tap(find.text(guardian.name));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('本次成功率 90%'));
-      expect(find.text('本次成功率 90%'), findsOneWidget);
+      await tester.ensureVisible(find.text('开始渡劫'));
+      expect(find.textContaining('承受3道雷劫'), findsOneWidget);
+      expect(find.text('本次成功率 90%'), findsNothing);
+      expect(find.text('开始渡劫'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

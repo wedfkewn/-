@@ -39,14 +39,19 @@ void main() {
     expect(result.inventory['筑基丹'], 2);
   });
   test(
-    'three and five round lightning survives defense, restores, and never permits escape',
+    'all eight major breakthroughs require resumable lightning before promotion and prohibit escape',
     () {
-      for (final realm in [6, 7]) {
+      for (final realm in List.generate(8, (i) => i)) {
         var w = prepared(realm: realm);
         final c = GameCommandService();
         final before = w.random.state;
         w = c.execute(w, const GameCommand('breakthrough'));
-        expect(w.tribulation!.rounds, realm == 6 ? 3 : 5);
+        expect(w.tribulation!.rounds, GrowthRules.trialRounds(realm));
+        expect(w.player.realm, realm);
+        expect(
+          () => c.execute(w, const GameCommand('breakthrough')),
+          throwsA(isA<RuleViolation>()),
+        );
         expect(
           w.random.state,
           before,
@@ -64,7 +69,7 @@ void main() {
         expect(w.player.realm, realm + 1);
         expect(
           w.events.values.where((e) => e.kind == 'tribulationRound').length,
-          realm == 6 ? 3 : 5,
+          GrowthRules.trialRounds(realm),
         );
       }
     },
@@ -89,6 +94,34 @@ void main() {
       expect(w.events[death.causes.single.eventId]!.kind, 'tribulationRound');
     },
   );
+  test('NPCs at every realm must survive lightning before promotion', () {
+    for (var realm = 0; realm < 8; realm++) {
+      final w = prepared(realm: realm);
+      final n = w.entities['growth:npc:0']!;
+      n.realm = realm;
+      n.stage = 3;
+      n.foundation = 100;
+      n.insight = 500;
+      n.spirit = 100000;
+      n.personality = '谨慎';
+      n.location = w.player.location;
+      n.hp = GameCommandService.maxHp(n);
+      n.supplies[MapRules.materials[realm]] = 1;
+      GrowthRules.npc(w, FactWriter(w), n, 0);
+      expect(n.alive, isTrue);
+      expect(n.realm, realm + 1);
+      final rounds = w.events.values
+          .where(
+            (e) => e.kind == 'npcTribulation' && e.participants.contains(n.id),
+          )
+          .toList();
+      expect(rounds.length, GrowthRules.trialRounds(realm));
+      final success = w.events.values.lastWhere(
+        (e) => e.kind == 'npcBreakthrough',
+      );
+      expect(w.events[success.causes.single.eventId]!.kind, 'npcTribulation');
+    }
+  });
   test(
     'secret expedition is dated, staged, resumable, sourced and safely exit-able',
     () {
@@ -216,17 +249,16 @@ void main() {
     },
   );
   test(
-    'failure charges 20 percent, injures without killing, and requires all recovery conditions',
+    'legacy breakthrough injuries still require all recovery conditions',
     () {
       var w = prepared();
-      w.random.state = 1; // first sample is 71, above the prepared 50% chance
-      final spirit = w.player.spirit, threshold = Content.threshold(0, 3);
       final c = GameCommandService();
-      w = c.execute(w, const GameCommand('breakthrough'));
-      expect(w.player.realm, 0);
-      expect(w.player.spirit, spirit - (threshold * .2).ceil());
-      expect(w.inventory['筑基丹'], 1);
-      expect(w.player.alive, isTrue);
+      w.player.injuryDay = w.day;
+      w.player.stabilizedDay = -1;
+      w.player.hp = (w.player.hp * .7).floor();
+      FactWriter(
+        w,
+      ).event('breakthroughFailed', '旧世突破受挫', '旧存档伤势', [w.playerId]);
       expect(GrowthRules.injured(w, w.player), isTrue);
       w = c.execute(w, const GameCommand('stabilize'));
       expect(GrowthRules.injured(w, w.player), isTrue);
@@ -248,6 +280,11 @@ void main() {
       w.random.state = 2; // first sample 42
       final before = w.player.spirit;
       w = GameCommandService().execute(w, const GameCommand('breakthrough'));
+      expect(w.player.realm, 0);
+      expect(w.tribulation, isNotNull);
+      while (w.tribulation != null && !w.frozen) {
+        w = GameCommandService().execute(w, const GameCommand('defend'));
+      }
       expect(w.player.realm, 1);
       expect(w.player.stage, 0);
       expect(w.player.foundation, 30);
@@ -257,10 +294,7 @@ void main() {
       final success = w.events.values.lastWhere(
         (e) => e.kind == 'breakthrough',
       );
-      expect(
-        w.events[success.causes.single.eventId]!.kind,
-        'breakthroughPreparation',
-      );
+      expect(w.events[success.causes.single.eventId]!.kind, 'tribulationRound');
     },
   );
   test(
@@ -277,7 +311,7 @@ void main() {
         bidirectional: true,
       );
       w.inventory['护脉丹'] = 1;
-      expect(GrowthRules.view(w, guard: guard.id, pill: true).chance, 70);
+      expect(GrowthRules.view(w, guard: guard.id, pill: true).shield, 120);
       guard.location = 'growth:location:10';
       expect(GrowthRules.view(w).guards, isNot(contains(guard.id)));
     },

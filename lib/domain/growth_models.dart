@@ -48,7 +48,8 @@ class GrowthView {
     this.rootRequired = 20,
     this.insightRequired = 0,
     this.material = '',
-    this.chance = 50,
+    this.trialRounds = 0,
+    this.shield = 0,
     this.injured = false,
     this.highTrial = false,
     this.terminal = false,
@@ -62,7 +63,8 @@ class GrowthView {
       threshold,
       rootRequired,
       insightRequired,
-      chance,
+      trialRounds,
+      shield,
       sourceCount;
   final String material;
   final bool injured, highTrial, terminal;
