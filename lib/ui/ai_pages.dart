@@ -24,10 +24,10 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       busy = false,
       hasKey = false,
       loadFailed = false;
-  String previousHost = '', message = '';
+  String previousOrigin = '', message = '';
   List<Map<String, dynamic>> usage = [];
   Map<String, int> totals = {};
-  AiContentService? detectingService;
+  AiContentService? detectingService, testingService;
   @override
   void initState() {
     super.initState();
@@ -55,7 +55,9 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
         world = s.world;
         consent = s.consent;
         hasKey = saved?.isNotEmpty == true;
-        previousHost = Uri.tryParse(s.base)?.host ?? '';
+        previousOrigin = s.base.isEmpty
+            ? ''
+            : Uri.tryParse(s.base)?.origin ?? '';
         usage = records;
         totals = total;
         loading = false;
@@ -74,6 +76,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
   @override
   void dispose() {
     detectingService?.cancel();
+    testingService?.cancel();
     base.dispose();
     model.dispose();
     key.dispose();
@@ -166,14 +169,14 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       );
       settings.endpoint;
       var confirmed = false;
-      final newHost = Uri.parse(settings.base).host;
-      if (previousHost.isNotEmpty && newHost != previousHost) {
+      final newOrigin = Uri.parse(settings.base).origin;
+      if (previousOrigin.isNotEmpty && newOrigin != previousOrigin) {
         confirmed =
             await showDialog<bool>(
               context: context,
               builder: (ctx) => InkDialog(
                 title: const Text('确认服务商变更'),
-                content: Text('新的 API 服务商为 $newHost。原密钥会移除，请输入用于该服务商的密钥后保存。'),
+                content: Text('新的 API 服务商为 $newOrigin。原密钥会移除，请输入用于该服务商的密钥后保存。'),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx, false),
@@ -187,17 +190,20 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
               ),
             ) ??
             false;
-        if (!confirmed) return;
+        if (!mounted || !confirmed) return;
         if (key.text.trim().isEmpty) throw const AiFailure('请为新的服务商输入密钥');
       }
       final service = ref.read(aiServiceProvider);
+      final db = ref.read(databaseProvider);
       if (test) {
-        if (previousHost.isNotEmpty &&
-            previousHost != newHost &&
+        if (previousOrigin.isNotEmpty &&
+            previousOrigin != newOrigin &&
             key.text.isEmpty) {
           throw const AiFailure('新服务商不能使用原密钥');
         }
+        testingService = service;
         await service.test(settings, key.text);
+        if (!mounted) return;
         message = '连接成功 · 测试请求可能产生 token 消耗';
       } else {
         await service.saveSettings(
@@ -205,18 +211,21 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
           key.text,
           hostConfirmed: confirmed,
         );
-        previousHost = newHost;
+        if (!mounted) return;
+        previousOrigin = newOrigin;
         hasKey = (await service.secrets.read())?.isNotEmpty == true;
+        if (!mounted) return;
         key.clear();
         message = '设置已保存';
       }
-      usage = await ref.read(databaseProvider).usage();
-      totals = await ref.read(databaseProvider).usageTotals();
+      usage = await db.usage();
+      totals = await db.usageTotals();
     } on AiFailure catch (e) {
       message = e.message;
     } catch (_) {
-      message = '设置未能保存，请重试';
+      message = test ? '连接测试失败，请重试' : '设置未能保存，请重试';
     } finally {
+      testingService = null;
       if (mounted) setState(() => busy = false);
     }
   }

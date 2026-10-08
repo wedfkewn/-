@@ -173,13 +173,13 @@ class AiClient {
           .postUri<dynamic>(
             endpoint,
             data: {
-              'model': settings.model,
+              'model': settings.model.trim(),
               'messages': messages,
               'stream': false,
             },
             options: Options(
               headers: {
-                'Authorization': 'Bearer $key',
+                'Authorization': 'Bearer ${key.trim()}',
                 'Content-Type': 'application/json',
               },
               sendTimeout: const Duration(seconds: 30),
@@ -195,6 +195,7 @@ class AiClient {
               throw const AiFailure('请求超时');
             },
           );
+      if (token.isCancelled) throw const AiFailure('请求已取消');
       final data = response.data is String
           ? jsonDecode(response.data)
           : response.data;
@@ -253,9 +254,11 @@ class AiContentService {
   final AiClient client;
   final SecretStore secrets;
   CancelToken? _token;
+  int _cancellationRevision = 0;
   bool foreground = true, cancelled = false;
   void beginAction() => cancelled = false;
   void cancel() {
+    _cancellationRevision++;
     cancelled = true;
     _token?.cancel();
   }
@@ -277,7 +280,7 @@ class AiContentService {
     final previous = await settings();
     final changed =
         previous.base.isNotEmpty &&
-        Uri.tryParse(previous.base)?.host != Uri.tryParse(next.base)?.host;
+        Uri.tryParse(previous.base)?.origin != Uri.tryParse(next.base)?.origin;
     if (changed && !hostConfirmed) throw const AiFailure('修改服务商后需重新确认保存密钥');
     if (next.enabled && !next.consent) throw const AiFailure('开启前需同意发送相关游戏背景');
     // Secret storage and SQLite cannot share a transaction. Publish a disabled
@@ -294,9 +297,9 @@ class AiContentService {
   }
 
   Future<void> test(AiSettings s, String? pendingKey) async {
-    final key = pendingKey?.isNotEmpty == true
+    final key = pendingKey?.trim().isNotEmpty == true
         ? pendingKey!.trim()
-        : await _storedKeyFor(s, requireEnabled: false);
+        : await _storedKeyFor(s, requireEnabled: false, requireModel: false);
     await _request(s, key, [
       {'role': 'user', 'content': '请回复：连接成功。'},
     ], 'test');
@@ -311,7 +314,9 @@ class AiContentService {
     final token = CancelToken();
     _token = token;
     try {
-      return await client.listModels(s, key, token);
+      final models = await client.listModels(s, key, token);
+      if (token.isCancelled) throw const AiFailure('请求已取消');
+      return models;
     } finally {
       if (identical(_token, token)) _token = null;
     }
@@ -322,17 +327,24 @@ class AiContentService {
     bool requireEnabled = true,
     bool requireModel = true,
   }) async {
+    final cancellationRevision = _cancellationRevision;
     final saved = await settings();
-    if (saved.base != expected.base ||
+    if (_cancellationRevision != cancellationRevision) {
+      throw const AiFailure('请求已取消');
+    }
+    if (saved.endpointFor('models') != expected.endpointFor('models') ||
         (requireModel && saved.model != expected.model)) {
       throw const AiFailure('配置已变化，请保存当前服务商的密钥后重试');
     }
     final key = await secrets.read() ?? '';
     final latest = await settings();
+    if (_cancellationRevision != cancellationRevision) {
+      throw const AiFailure('请求已取消');
+    }
     if (requireEnabled && (!latest.enabled || !latest.consent)) {
       throw const AiFailure('AI已关闭，使用本地内容');
     }
-    if (latest.base != expected.base ||
+    if (latest.endpointFor('models') != expected.endpointFor('models') ||
         (requireModel && latest.model != expected.model)) {
       throw const AiFailure('配置已变化，请重新生成');
     }
@@ -352,6 +364,7 @@ class AiContentService {
     String status = 'failed';
     try {
       reply = await client.request(s, key, messages, token);
+      if (token.isCancelled) throw const AiFailure('请求已取消');
       status = 'received';
       return reply;
     } finally {
