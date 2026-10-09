@@ -1,6 +1,8 @@
+import 'commission_models.dart';
+
 /// Versioned rules. Costs are game days, never wall-clock time.
 abstract final class Content {
-  static const version = 5;
+  static const version = 6;
   static const stages = ['初期', '中期', '后期', '圆满'];
   static const cultivationThresholds = [
     80,
@@ -51,7 +53,37 @@ abstract final class Content {
     '凝丹灵液': 120,
     '结婴丹': 240,
   };
+  static const commissions = {
+    'travel': CommissionDefinition(
+      title: '寻访山河',
+      description: '接取后亲自抵达两处不同地点，带回山河见闻。',
+      objectives: {'visit': '抵达不同地点'},
+      requirements: {'visit': 2},
+      coins: 18,
+      foundation: 3,
+    ),
+    'alchemy': CommissionDefinition(
+      title: '丹炉初试',
+      description: '接取后采集灵草并炼成回春丹，交付一枚丹药。',
+      objectives: {'gather': '采集灵草', 'craft': '炼成回春丹'},
+      requirements: {'gather': 1, 'craft': 1},
+      coins: 22,
+      foundation: 2,
+      deliveryItem: '回春丹',
+    ),
+    'foundation': CommissionDefinition(
+      title: '固本培元',
+      description: '接取后完成一次稳固境界和一次功法训练。',
+      objectives: {'stabilize': '稳固境界', 'practice': '功法训练'},
+      requirements: {'stabilize': 1, 'practice': 1},
+      coins: 16,
+      foundation: 5,
+    ),
+  };
   static const durations = {
+    'acceptCommission': 0,
+    'claimCommission': 0,
+    'abandonCommission': 0,
     'cultivate': 30,
     'breakthrough': 7,
     'explore': 3,

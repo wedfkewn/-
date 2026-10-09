@@ -5,6 +5,7 @@ part 'adventure_rules.dart';
 part 'map_rules.dart';
 part 'growth_rules.dart';
 part 'equipment_rules.dart';
+part 'commission_rules.dart';
 
 class RuleViolation implements Exception {
   const RuleViolation(this.message);
@@ -570,6 +571,12 @@ class GameCommandService {
       GrowthRules.tribulationTurn(w, f, command);
     } else {
       switch (command.kind) {
+        case 'acceptCommission':
+          CommissionRules.accept(w, f, command.item);
+        case 'claimCommission':
+          CommissionRules.claim(w, f);
+        case 'abandonCommission':
+          CommissionRules.abandon(w, f);
         case 'cultivate':
           GrowthRules.cultivate(w, f);
         case 'stabilize':
@@ -1201,6 +1208,7 @@ class GameCommandService {
       w.battleTarget = null;
       w.battleOrigin = null;
     }
+    CommissionRules.record(w, f, command, original);
     // Refresh facts that changed in a player-observed action, preserving all
     // remote knowledge snapshots otherwise.
     for (final r in w.relations.values.where(

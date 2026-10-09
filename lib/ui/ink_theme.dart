@@ -47,11 +47,13 @@ abstract final class InkTheme {
         ),
         titleLarge: TextStyle(
           fontFamily: 'MaShan',
+          fontFamilyFallback: ['WenKai'],
           fontSize: 28,
           color: foreground,
         ),
         headlineSmall: TextStyle(
           fontFamily: 'MaShan',
+          fontFamilyFallback: ['WenKai'],
           fontSize: 32,
           color: foreground,
         ),
@@ -63,6 +65,7 @@ abstract final class InkTheme {
         scrolledUnderElevation: 0,
         titleTextStyle: TextStyle(
           fontFamily: 'MaShan',
+          fontFamilyFallback: ['WenKai'],
           fontSize: 27,
           color: foreground,
         ),

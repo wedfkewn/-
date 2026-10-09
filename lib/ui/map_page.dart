@@ -8,6 +8,7 @@ import '../domain/map_repository.dart';
 import '../domain/models.dart';
 import '../domain/content.dart';
 import 'ink_theme.dart';
+import 'ai_pages.dart';
 
 class MapPage extends ConsumerStatefulWidget {
   const MapPage({super.key});
@@ -17,6 +18,7 @@ class MapPage extends ConsumerStatefulWidget {
 
 class _MapPageState extends ConsumerState<MapPage> {
   final transform = TransformationController();
+  final searchController = TextEditingController();
   int? region;
   PlaceKind? kind;
   String search = '';
@@ -24,6 +26,7 @@ class _MapPageState extends ConsumerState<MapPage> {
   @override
   void dispose() {
     transform.dispose();
+    searchController.dispose();
     super.dispose();
   }
 
@@ -44,6 +47,13 @@ class _MapPageState extends ConsumerState<MapPage> {
       if (mounted) setState(() => busy = false);
     }
   }
+
+  bool advancingDisabled(GameView view) =>
+      view.readOnly ||
+      busy ||
+      view.map.paused ||
+      view.secretStage != null ||
+      view.inTribulation;
 
   Future<void> details(KnownPlace known, GameView view) async {
     final p = known.place;
@@ -99,7 +109,7 @@ class _MapPageState extends ConsumerState<MapPage> {
                   ),
                   ...segments.map((text) => Text(text)),
                   FilledButton(
-                    onPressed: view.readOnly || busy || view.map.paused
+                    onPressed: advancingDisabled(view)
                         ? null
                         : () {
                             Navigator.pop(ctx);
@@ -139,12 +149,7 @@ class _MapPageState extends ConsumerState<MapPage> {
               (kind == null || p.place.kind == kind),
         )
         .toList();
-    final disabled =
-        v.readOnly ||
-        busy ||
-        m.paused ||
-        v.secretStage != null ||
-        v.inTribulation;
+    final disabled = advancingDisabled(v);
     final here = m.places.where((p) => p.place.id == m.current).firstOrNull;
     return Scaffold(
       appBar: AppBar(
@@ -160,6 +165,7 @@ class _MapPageState extends ConsumerState<MapPage> {
               setState(() {
                 region = current?.place.region;
                 search = '';
+                searchController.clear();
                 kind = null;
                 transform.value = Matrix4.identity()
                   ..translateByDouble(
@@ -173,7 +179,7 @@ class _MapPageState extends ConsumerState<MapPage> {
           ),
         ],
       ),
-      bottomNavigationBar: m.destination == null
+      bottomNavigationBar: m.destination == null && !m.paused
           ? null
           : SafeArea(
               child: PaperSurface(
@@ -185,25 +191,55 @@ class _MapPageState extends ConsumerState<MapPage> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        '剩余行旅：${m.remaining.length}段 · ${m.remaining.fold<int>(0, (s, r) => s + r.travelDays(v.realmIndex))}日',
-                      ),
-                      if (m.paused) const Text('行旅暂停，请先返回处理奇遇或战斗'),
-                      Wrap(
-                        spacing: 12,
-                        children: [
-                          FilledButton(
-                            onPressed: disabled ? null : () => act('moveStep'),
-                            child: const Text('前进一段'),
-                          ),
-                          TextButton(
-                            onPressed: disabled
-                                ? null
-                                : () => act('cancelRoute'),
-                            child: const Text('取消剩余路线'),
-                          ),
-                        ],
-                      ),
+                      if (m.destination != null)
+                        Text(
+                          '剩余行旅：${m.remaining.length}段 · ${m.remaining.fold<int>(0, (s, r) => s + r.travelDays(v.realmIndex))}日',
+                        ),
+                      if (m.paused) ...[
+                        Text(
+                          v.encounter != null
+                              ? '有待处理奇遇，请先处理后继续行动'
+                              : '正在交锋，请先完成战斗或雷劫',
+                        ),
+                        FilledButton(
+                          onPressed: v.readOnly || busy
+                              ? null
+                              : () {
+                                  if (v.encounter != null) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => const EncounterPage(),
+                                      ),
+                                    );
+                                  } else {
+                                    Navigator.popUntil(
+                                      context,
+                                      (route) => route.isFirst,
+                                    );
+                                  }
+                                },
+                          child: Text(v.encounter != null ? '处理奇遇' : '返回交锋'),
+                        ),
+                      ],
+                      if (m.destination != null)
+                        Wrap(
+                          spacing: 12,
+                          children: [
+                            FilledButton(
+                              onPressed: disabled
+                                  ? null
+                                  : () => act('moveStep'),
+                              child: const Text('前进一段'),
+                            ),
+                            TextButton(
+                              onPressed: disabled
+                                  ? null
+                                  : () => act('cancelRoute'),
+                              child: const Text('取消剩余路线'),
+                            ),
+                          ],
+                        ),
                     ],
                   ),
                 ),
@@ -226,6 +262,7 @@ class _MapPageState extends ConsumerState<MapPage> {
               const InkIllustration(art: 'wild_a', height: 90),
             Text('所在：${v.location} · ${Content.date(v.day)}'),
             TextField(
+              controller: searchController,
               decoration: const InputDecoration(labelText: '搜索已知地点'),
               onChanged: (s) => setState(() => search = s),
             ),
@@ -385,7 +422,7 @@ class _MapPageState extends ConsumerState<MapPage> {
                   child: const Text('安全离开秘境'),
                 ),
                 OutlinedButton(
-                  onPressed: v.readOnly || busy
+                  onPressed: v.readOnly || busy || m.paused || v.inTribulation
                       ? null
                       : () => act('useItem', item: '回春丹'),
                   child: const Text('服回春丹'),

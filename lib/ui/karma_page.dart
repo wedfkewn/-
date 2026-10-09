@@ -20,6 +20,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
   Set<KarmaRelationType> types = {};
   Set<RelationStatus> statuses = {};
   int strength = 0;
+  bool searching = false;
   final canvas = GlobalKey<GraphCanvasState>();
   void reset() {
     setState(() {
@@ -32,17 +33,19 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
     canvas.currentState?.reset();
   }
 
-  Future<void> search() async {
+  Future<void> search({bool npcOnly = false}) async {
+    if (searching) return;
+    searching = true;
     final repository = ref.read(gameProvider.notifier).repository!;
     final controller = TextEditingController();
-    final result = await showDialog<KarmaNode>(
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final searchType = npcOnly || scope == 1 ? KarmaNodeType.npc : null;
+    final route = DialogRoute<KarmaNode>(
       context: context,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
       builder: (context) => StatefulBuilder(
         builder: (context, update) {
-          final matches = repository.search(
-            controller.text,
-            type: scope == 1 ? KarmaNodeType.npc : null,
-          );
+          final matches = repository.search(controller.text, type: searchType);
           return InkDialog(
             title: const Text('搜索已知实体'),
             content: SizedBox(
@@ -83,12 +86,20 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
         },
       ),
     );
-    // Dialog route finishes disposing its text field after the pop animation.
-    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
-    if (result != null && mounted) {
+    KarmaNode? result;
+    try {
+      result = await navigator.push(route);
+      // Popping resolves push before the dialog's exit animation is finished.
+      await route.completed;
+    } finally {
+      controller.dispose();
+      searching = false;
+    }
+    final selected = result;
+    if (selected != null && mounted) {
       setState(() {
-        center = result.id;
-        scope = result.type == KarmaNodeType.npc ? 1 : 0;
+        center = selected.id;
+        scope = selected.type == KarmaNodeType.npc ? 1 : 0;
         relation = null;
       });
       WidgetsBinding.instance.addPostFrameCallback(
@@ -222,8 +233,7 @@ class _KarmaPageState extends ConsumerState<KarmaPage> {
                 selected: {scope},
                 onSelectionChanged: (s) {
                   if (s.first == 1) {
-                    setState(() => scope = 1);
-                    search();
+                    search(npcOnly: true);
                   } else {
                     setState(() {
                       scope = s.first;

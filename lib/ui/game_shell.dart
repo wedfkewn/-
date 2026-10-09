@@ -15,6 +15,9 @@ import 'map_page.dart';
 import 'growth_page.dart';
 import 'save_page.dart';
 import 'creation_page.dart';
+import 'commission_page.dart';
+import 'location_activities.dart';
+import 'timeline.dart';
 import '../application/ai_service.dart';
 
 class GameShell extends ConsumerStatefulWidget {
@@ -55,6 +58,43 @@ class _GameShellState extends ConsumerState<GameShell>
       () => ref.read(gameProvider.notifier).returnToCurrent(),
     );
     if (success && mounted) setState(() => showingSaves = true);
+  }
+
+  Future<void> returnToCurrentLife() async {
+    final success = await run(
+      () => ref.read(gameProvider.notifier).returnToCurrent(),
+    );
+    if (!success || !mounted) return;
+    final current = ref.read(gameProvider).asData?.value;
+    setState(() {
+      showingSaves = current == null || !current.exists || current.readOnly;
+      tab = 0;
+      activity = -1;
+    });
+  }
+
+  void noticeBattle(GameView before, GameView after) {
+    if (showingSaves ||
+        after.readOnly ||
+        before.playerId != after.playerId ||
+        before.battleName != null ||
+        after.battleName == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final current = ref.read(gameProvider).asData?.value;
+      if (current?.playerId != after.playerId ||
+          current?.readOnly != false ||
+          current?.battleName == null) {
+        return;
+      }
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() {
+        tab = 0;
+        activity = -1;
+      });
+    });
   }
 
   void noticeDeath(GameView before, GameView after) {
@@ -196,7 +236,12 @@ class _GameShellState extends ConsumerState<GameShell>
   }) => Padding(
     padding: const EdgeInsets.only(right: 8, bottom: 8),
     child: OutlinedButton(
-      onPressed: view.readOnly || busy
+      onPressed:
+          view.readOnly ||
+              busy ||
+              view.battleName != null ||
+              view.encounter != null ||
+              view.secretStage != null
           ? null
           : () => command(
               kind,
@@ -308,11 +353,44 @@ class _GameShellState extends ConsumerState<GameShell>
     }
   }
 
+  void locationAction(String action) {
+    if (busy) return;
+    switch (action) {
+      case 'explore':
+        command('explore');
+      case 'gather':
+        command('gather', item: '灵草');
+      case 'market':
+        setState(() {
+          tab = 0;
+          activity = 1;
+        });
+      case 'map':
+        Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const MapPage()),
+        );
+      case 'growth':
+        Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const GrowthPage()),
+        );
+      case 'commission':
+        Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const CommissionPage()),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen(gameProvider, (previous, next) {
       final before = previous?.asData?.value, after = next.asData?.value;
-      if (before != null && after != null) noticeDeath(before, after);
+      if (before != null && after != null) {
+        noticeDeath(before, after);
+        noticeBattle(before, after);
+      }
     });
     final game = ref.watch(gameProvider);
     final request = ref.watch(aiRequestProvider);
@@ -432,7 +510,28 @@ class _GameShellState extends ConsumerState<GameShell>
                                   .read(gameProvider.notifier)
                                   .repository!,
                               busy: busy,
-                              onCommand: (kind) => kind == 'breakthrough'
+                              onCommand: (kind) => kind == 'commission'
+                                  ? Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => const CommissionPage(),
+                                      ),
+                                    )
+                                  : kind == 'resolveEncounter'
+                                  ? Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => const EncounterPage(),
+                                      ),
+                                    )
+                                  : kind == 'showMap'
+                                  ? Navigator.push(
+                                      context,
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => const MapPage(),
+                                      ),
+                                    )
+                                  : kind == 'breakthrough'
                                   ? Navigator.push(
                                       context,
                                       MaterialPageRoute<void>(
@@ -673,6 +772,11 @@ class _GameShellState extends ConsumerState<GameShell>
               ),
             ),
       ] else ...[
+        OutlinedButton.icon(
+          icon: const Icon(Icons.assignment_outlined),
+          label: const Text('山河委托 · 接约与交付'),
+          onPressed: busy ? null : () => locationAction('commission'),
+        ),
         heading('奇遇与宗门委托'),
         if (v.quests.isEmpty) const Text('探索可能发现古碑；加入宗门可领取委托。'),
         ...v.quests.entries.map(
@@ -717,7 +821,7 @@ class _GameShellState extends ConsumerState<GameShell>
       ...ref
           .read(gameProvider.notifier)
           .repository!
-          .recent(limit: 8)
+          .recent(limit: 3)
           .map(
             (e) => ListTile(
               contentPadding: EdgeInsets.zero,
@@ -730,7 +834,27 @@ class _GameShellState extends ConsumerState<GameShell>
               ),
             ),
           ),
-      Text('世界种子：${v.seed}', style: Theme.of(context).textTheme.bodySmall),
+      TextButton.icon(
+        icon: const Icon(Icons.history),
+        label: const Text('查看因果长河'),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('因果长河')),
+              body: PaperSurface(
+                child: CausalTimeline(
+                  repository: ref.read(gameProvider.notifier).repository!,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      ExpansionTile(
+        title: const Text('世界信息'),
+        children: [Text('世界种子：${v.seed}')],
+      ),
     ],
   );
   Widget world(GameView v) => ListView(
@@ -756,29 +880,9 @@ class _GameShellState extends ConsumerState<GameShell>
       if (v.aiNotice.isNotEmpty) Text(v.aiNotice),
       const SizedBox(height: 18),
       const Divider(),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        child: Row(
-          children: [
-            const Expanded(
-              child: Text(
-                '寻访机缘',
-                style: TextStyle(fontFamily: 'MaShan', fontSize: 26),
-              ),
-            ),
-            InkAction(
-              label: '探索 · 3日',
-              onPressed:
-                  v.readOnly ||
-                      busy ||
-                      v.encounter != null ||
-                      v.battleName != null
-                  ? null
-                  : () => command('explore'),
-            ),
-          ],
-        ),
-      ),
+      heading('此地可行'),
+      LocationActivities(view: v, busy: busy, onAction: locationAction),
+      const SizedBox(height: 18),
       const Divider(),
       heading('山河行旅'),
       OutlinedButton.icon(
@@ -931,16 +1035,13 @@ class _GameShellState extends ConsumerState<GameShell>
         ),
         const Text('评分依据强度、结果、了结与世界影响，统计数量不直接决定分数。'),
       ],
-      if (v.readOnly)
+      if (v.readOnly && ref.read(gameProvider.notifier).canCreateLife)
         FilledButton(
           onPressed: busy ? null : create,
           child: const Text('开启新一世'),
         ),
       TextButton(
-        onPressed: busy
-            ? null
-            : () =>
-                  run(() => ref.read(gameProvider.notifier).returnToCurrent()),
+        onPressed: busy ? null : returnToCurrentLife,
         child: const Text('回到当前人生'),
       ),
       ...v.archives.map(

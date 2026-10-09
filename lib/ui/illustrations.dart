@@ -65,6 +65,14 @@ abstract final class IllustrationResolver {
   static String encounter(Encounter encounter, MapView map) {
     if (encounter.source != 'local') return current(map);
     final kind = encounter.options.where((o) => !o.leaves).firstOrNull?.id;
+    final expandedArt = switch (kind) {
+      'rain_rest' || 'rain_brew' => 'town_b',
+      'kiln_gather' || 'kiln_sort' => 'feature_alchemy',
+      'garden_gather' || 'garden_cleanse' => 'encounter_herbs',
+      'sword_study' || 'sword_trace' => 'encounter_tablet',
+      _ => null,
+    };
+    if (expandedArt != null) return expandedArt;
     final key = 'encounter_$kind';
     return IllustrationCatalog.keys.contains(key) ? key : current(map);
   }

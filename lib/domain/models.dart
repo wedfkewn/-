@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'commission_models.dart';
+export 'commission_models.dart';
 import 'character_models.dart';
 export 'character_models.dart';
 import 'adventure_models.dart';
@@ -361,6 +363,7 @@ class World {
   final Map<String, int> inventory = {'灵草': 6, '回春丹': 2};
   final Set<String> techniques = {'长春诀'};
   final Map<String, int> quests = {};
+  final List<CommissionState> commissions = [];
   int mapVersion = 0, regionCount = 12, placesPerRegion = 24;
   final Map<String, MapPlace> mapPlaces = {};
   final Map<String, MapRoad> mapRoads = {};
@@ -486,6 +489,7 @@ class World {
     'inventory': inventory,
     'techniques': techniques.toList(),
     'quests': quests,
+    'commissions': commissions.map((c) => c.toJson()).toList(),
     'mapVersion': mapVersion,
     'regionCount': regionCount,
     'placesPerRegion': placesPerRegion,
@@ -547,6 +551,11 @@ class World {
       ..clear()
       ..addAll(List<String>.from(j['techniques']));
     w.quests.addAll(Map<String, int>.from(j['quests']));
+    for (final value in j['commissions'] ?? []) {
+      w.commissions.add(
+        CommissionState.fromJson(Map<String, dynamic>.from(value)),
+      );
+    }
     w.mapVersion = j['mapVersion'] ?? 0;
     if (j['tribulation'] != null) {
       w.tribulation = Tribulation.fromJson(

@@ -25,6 +25,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       hasKey = false,
       loadFailed = false;
   String previousOrigin = '', message = '';
+  String narrativeStyle = '江湖纪实', detail = 'brief';
   List<Map<String, dynamic>> usage = [];
   Map<String, int> totals = {};
   AiContentService? detectingService, testingService;
@@ -54,6 +55,8 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
         enabled = s.enabled;
         world = s.world;
         consent = s.consent;
+        narrativeStyle = s.narrativeStyle;
+        detail = s.detail;
         hasKey = saved?.isNotEmpty == true;
         previousOrigin = s.base.isEmpty
             ? ''
@@ -166,6 +169,8 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
         enabled: enabled,
         world: world,
         consent: consent,
+        narrativeStyle: narrativeStyle,
+        detail: detail,
       );
       settings.endpoint;
       var confirmed = false;
@@ -226,6 +231,31 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
       message = test ? '连接测试失败，请重试' : '设置未能保存，请重试';
     } finally {
       testingService = null;
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> deleteKey() async {
+    if (busy) return;
+    final db = ref.read(databaseProvider);
+    final secrets = ref.read(secretStoreProvider);
+    setState(() => busy = true);
+    var disabled = false;
+    try {
+      final settings = await db.settings();
+      await db.saveSettings({...settings, 'enabled': false});
+      disabled = true;
+      if (mounted) setState(() => enabled = false);
+      await secrets.delete();
+      if (!mounted) return;
+      key.clear();
+      hasKey = false;
+      message = '密钥已删除，AI已关闭';
+    } catch (_) {
+      if (mounted) {
+        message = disabled ? 'AI已关闭，但密钥删除失败，请重试。' : '无法关闭AI，密钥未删除，请重试。';
+      }
+    } finally {
       if (mounted) setState(() => busy = false);
     }
   }
@@ -302,6 +332,38 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
                       hintText: '点击检测选择，或手动填写',
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '天机叙事',
+                    style: TextStyle(fontFamily: 'MaShan', fontSize: 25),
+                  ),
+                  const Text('只改变笔调与篇幅，结果由本地规则结算。'),
+                  DropdownButtonFormField<String>(
+                    initialValue: narrativeStyle,
+                    decoration: const InputDecoration(labelText: '叙事风格'),
+                    items: AiSettings.narrativeStyles
+                        .map(
+                          (style) => DropdownMenuItem(
+                            value: style,
+                            child: Text(style),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: busy
+                        ? null
+                        : (value) => setState(() => narrativeStyle = value!),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('简短叙事'),
+                    subtitle: const Text('默认开启；关闭后使用标准篇幅。'),
+                    value: detail == 'brief',
+                    onChanged: busy
+                        ? null
+                        : (value) => setState(
+                            () => detail = value == true ? 'brief' : 'standard',
+                          ),
+                  ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('启用 AI 奇遇与人物对话'),
@@ -342,25 +404,7 @@ class _AiSettingsPageState extends ConsumerState<AiSettingsPage> {
                           child: const Text('取消请求'),
                         ),
                       TextButton(
-                        onPressed: busy
-                            ? null
-                            : () async {
-                                await ref.read(secretStoreProvider).delete();
-                                final s = await ref
-                                    .read(aiServiceProvider)
-                                    .settings();
-                                await ref.read(databaseProvider).saveSettings({
-                                  ...s.toJson(),
-                                  'enabled': false,
-                                });
-                                if (mounted) {
-                                  setState(() {
-                                    hasKey = false;
-                                    enabled = false;
-                                    message = '密钥已删除，AI已关闭';
-                                  });
-                                }
-                              },
+                        onPressed: busy ? null : deleteKey,
                         child: const Text('删除密钥'),
                       ),
                     ],
@@ -410,7 +454,10 @@ class _EncounterPageState extends ConsumerState<EncounterPage> {
   bool busy = false;
   String error = '';
   Future<void> choose(String id) async {
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      error = '';
+    });
     try {
       await ref
           .read(gameProvider.notifier)
@@ -445,7 +492,7 @@ class _EncounterPageState extends ConsumerState<EncounterPage> {
               Text(e.source == 'ai' ? '天机所述 · 结果经本地规则校验' : '山河所见'),
               const SizedBox(height: 18),
               InkIllustration(art: IllustrationResolver.encounter(e, v!.map)),
-              ExpandableNarrative(e.text),
+              ExpandableNarrative(e.text, lines: 3),
               const SizedBox(height: 22),
               ...e.options.map((o) {
                 final disabled =
@@ -498,7 +545,10 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
 
   Future<void> send(String text) async {
     if (busy || text.trim().isEmpty) return;
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      error = '';
+    });
     try {
       await ref
           .read(gameProvider.notifier)
@@ -519,6 +569,9 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
         .read(gameProvider.notifier)
         .repository
         ?.node(widget.npc);
+    final topics = ref
+        .read(gameProvider.notifier)
+        .conversationTopics(widget.npc);
     final turns = v?.dialogue.where((t) => t.npc == widget.npc).toList() ?? [];
     return Scaffold(
       appBar: AppBar(title: Text('与${widget.name}交谈')),
@@ -530,7 +583,7 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
               '言语留痕，行动结缘',
               style: TextStyle(fontFamily: 'MaShan', fontSize: 28),
             ),
-            const Text('每轮交谈耗时1日。人物言论不等于事实，结交与交易请使用正式行动。'),
+            const Text('每轮1日 · 言论待查证 · 结交与交易需正式行动'),
             if (knownNpc != null)
               InkIllustration(
                 art: IllustrationResolver.node(knownNpc),
@@ -562,7 +615,11 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
                       children: [
                         Text('你：${t.input}'),
                         const SizedBox(height: 8),
-                        Text('${widget.name}：${t.reply}'),
+                        ExpandableNarrative(
+                          '${widget.name}：${t.reply}',
+                          lines: 3,
+                          label: '展开言论',
+                        ),
                         const Divider(),
                       ],
                     ),
@@ -581,7 +638,7 @@ class _DialoguePageState extends ConsumerState<DialoguePage> {
             if (v?.aiNotice.isNotEmpty == true) Text(v!.aiNotice),
             Wrap(
               spacing: 6,
-              children: ['此地近来有什么见闻？', '你的修行近况如何？', '你对世间因缘有何看法？']
+              children: topics
                   .map(
                     (s) => ActionChip(
                       label: Text(s),

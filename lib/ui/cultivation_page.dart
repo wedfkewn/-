@@ -28,7 +28,12 @@ class CultivationPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final frozen = view.readOnly || busy;
+    final frozen =
+        view.readOnly ||
+        busy ||
+        view.encounter != null ||
+        view.battleName != null ||
+        view.secretStage != null;
     final graph = repository.query(
       const GraphQuery(
         hops: 1,
@@ -238,10 +243,38 @@ class CultivationPage extends StatelessWidget {
                 ),
               ),
               const Divider(),
+              if (view.encounter != null)
+                _ActionRow(
+                  title: '待处理奇遇 · ${view.encounter!.title}',
+                  subtitle: '处理后继续修行与行旅',
+                  icon: Icons.auto_awesome_outlined,
+                  trailing: InkAction(
+                    label: '处理奇遇',
+                    onPressed: view.readOnly || busy
+                        ? null
+                        : () => onCommand('resolveEncounter'),
+                  ),
+                ),
+              if (view.secretStage != null && view.battleName == null)
+                _ActionRow(
+                  title: '秘境探索尚未结束',
+                  subtitle: '返回地图继续或离开',
+                  icon: Icons.map_outlined,
+                  onTap: view.readOnly || busy
+                      ? null
+                      : () => onCommand('showMap'),
+                ),
+              if (view.battleName == null)
+                _ActionRow(
+                  title: view.commission.canClaim ? '山河委托 · 可交付' : '山河委托',
+                  subtitle: view.commission.active?.title ?? '寻访 · 炼丹 · 稳固',
+                  icon: Icons.assignment_outlined,
+                  onTap: busy ? null : () => onCommand('commission'),
+                ),
               if (view.battleName == null) ...[
                 _ActionRow(
                   title: '闭关修炼',
-                  subtitle: '静心凝神，运转周天，稳固修为。',
+                  subtitle: '积累修为',
                   active: true,
                   icon: Icons.self_improvement,
                   trailing: InkAction(
@@ -253,13 +286,13 @@ class CultivationPage extends StatelessWidget {
                 _ActionRow(
                   title: view.growth.stage < 3 ? '境界成长' : '突破准备',
                   subtitle:
-                      '根基 ${view.growth.foundation} · 感悟 ${view.growth.insight} · 查看条件与历练',
+                      '根基 ${view.growth.foundation} · 感悟 ${view.growth.insight}',
                   icon: Icons.arrow_upward,
                   onTap: frozen ? null : () => onCommand('breakthrough'),
                 ),
                 _ActionRow(
                   title: '前往世界',
-                  subtitle: '游历四方，结识故人，探寻机缘。',
+                  subtitle: '行旅 · 寻缘 · 结交',
                   icon: Icons.temple_buddhist_outlined,
                   onTap: onWorld,
                 ),
@@ -508,7 +541,7 @@ class _ActionRow extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const Icon(Icons.chevron_right, size: 29),
+                      trailing ?? const Icon(Icons.chevron_right, size: 29),
                     ],
                   ),
           ),

@@ -76,6 +76,7 @@ class GameView {
     this.equipmentDefense = 0,
     this.maxQi = 10,
     this.combatFeedback,
+    this.commission = const CommissionBoardView(),
   });
   final bool exists, readOnly;
   final String name, date, seed, realm, location, playerId;
@@ -111,6 +112,7 @@ class GameView {
   final RebirthEntitlement rebirth;
   final int equipmentAttack, equipmentDefense, maxQi;
   final CombatFeedback? combatFeedback;
+  final CommissionBoardView commission;
 }
 
 class LifeArchive {
@@ -135,9 +137,20 @@ class GameController extends AsyncNotifier<GameView> {
   String _aiNotice = '';
   void cancelAi() => ref.read(aiServiceProvider).cancel();
   bool _viewingArchive = false;
+  bool _currentLifeEnded = true;
   List<LifeArchive> _archives = [];
   RebirthEntitlement _rebirth = const RebirthEntitlement();
   KarmaRepository? get repository => _repository;
+  bool get canCreateLife => _currentLifeEnded;
+  List<String> conversationTopics(String npc) {
+    if (_world == null) return const [];
+    try {
+      return ref.read(aiServiceProvider).suggestedTopics(_world!, npc);
+    } on RuleViolation {
+      return const [];
+    }
+  }
+
   List<MapRoad>? previewRoute(String target) =>
       _world == null ? null : MapRepository(_world!).route(target);
   GrowthView previewGrowth({String? guard, bool pill = false}) => _world == null
@@ -148,6 +161,7 @@ class GameController extends AsyncNotifier<GameView> {
     final service = ref.read(aiServiceProvider);
     ref.onDispose(service.cancel);
     _world = await ref.read(databaseProvider).load();
+    _currentLifeEnded = _world?.frozen != false;
     if (_world != null && !_world!.frozen && _world!.mapVersion == 0) {
       final next = _world!.copy();
       MapRules.generate(next);
@@ -181,6 +195,7 @@ class GameController extends AsyncNotifier<GameView> {
       _world = next;
     }
     await _refreshArchives();
+    _currentLifeEnded = _world?.frozen != false;
     return _project();
   }
 
@@ -236,6 +251,7 @@ class GameController extends AsyncNotifier<GameView> {
       equipmentDefense: EquipmentRules.stats(w).defense,
       maxQi: EquipmentRules.maxQi(w),
       combatFeedback: w.feedback,
+      commission: CommissionRules.view(w),
       age: p.ageDays ~/ 360,
       day: w.day,
       lifespan: Content.lifespans[p.realm],
@@ -330,6 +346,7 @@ class GameController extends AsyncNotifier<GameView> {
       await _refreshArchives();
       _world = next;
       _viewingArchive = false;
+      _currentLifeEnded = false;
       state = AsyncData(_project());
     } finally {
       _busy = false;
@@ -361,6 +378,7 @@ class GameController extends AsyncNotifier<GameView> {
         recovered.pendingAi = null;
         await ref.read(databaseProvider).save(recovered, previous: _world);
         _world = recovered;
+        _currentLifeEnded = recovered.frozen;
         if (recovered.frozen) await _refreshArchives();
         state = AsyncData(_project());
         throw const RuleViolation('上次行动已用本地内容恢复，请检查结果后继续');
@@ -500,6 +518,7 @@ class GameController extends AsyncNotifier<GameView> {
       }
       await ref.read(databaseProvider).save(next, previous: current);
       _world = next;
+      _currentLifeEnded = next.frozen;
       if (next.frozen) {
         await _refreshArchives();
       }
@@ -536,6 +555,7 @@ class GameController extends AsyncNotifier<GameView> {
     try {
       _world = await ref.read(databaseProvider).load();
       _viewingArchive = false;
+      _currentLifeEnded = _world?.frozen != false;
       state = AsyncData(_project());
     } finally {
       _busy = false;
